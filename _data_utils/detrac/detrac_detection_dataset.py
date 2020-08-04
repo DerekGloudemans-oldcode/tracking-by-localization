@@ -140,11 +140,13 @@ class Detection_Dataset(data.Dataset):
             y = torch.zeros([1,5])
             
         # randomly flip
-            
-        # randomly shift image in x and y direction
-      
-
-        
+        FLIP = np.random.rand()
+        if FLIP > 0.5:
+            im= F.hflip(im)
+            # reverse coords and also switch xmin and xmax
+            y[:,0] = im.size[0] - y[:,0]
+            y[:,2] = im.size[0] - y[:,2]
+                
         
         # convert image and label to tensors
         im_t = self.im_tf(im)
