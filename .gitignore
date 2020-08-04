@@ -1,0 +1,8 @@
+
+data/detrac_detections/ACF-test/ACF/
+
+*.txt
+
+*.pt
+
+*.pyc
