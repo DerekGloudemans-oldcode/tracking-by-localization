@@ -383,7 +383,7 @@ if __name__ == "__main__":
     #             "reg": [nn.MSELoss,Box_Loss()]
     #             }
     
-    if False:    
+    if True:    
     # train model
         print("Beginning training.")
         model,all_metrics = train_model(model,

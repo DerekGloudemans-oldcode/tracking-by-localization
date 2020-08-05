@@ -44,5 +44,7 @@ directories = ["/home/worklab/Documents/code/tracking-by-localization/config",
                "/home/worklab/Documents/code/tracking-by-localization/_eval",
                "/home/worklab/Documents/code/tracking-by-localization/_localizers",
                "/home/worklab/Documents/code/tracking-by-localization/_train",
-               "/home/worklab/Documents/code/tracking-by-localization/_tracker"
+               "/home/worklab/Documents/code/tracking-by-localization/_tracker",
+               "/home/worklab/Documents/code/tracking-by-localization/_detectors/pytorch_retinanet"
+               
                ]

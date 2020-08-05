@@ -1,4 +1,7 @@
 """
+Derek Gloudemans - August 4, 2020
+Adapted from https://github.com/yhenon/pytorch-retinanet - train.py
+
 This file provides a dataset class for working with the UA-detrac tracking dataset.
 Provides:
     - plotting of 2D bounding boxes
@@ -339,7 +342,37 @@ class_dict = {
             13:"None"
             }
 
-
+def collate(inputs):
+    """
+    Recieves list of tuples and returns a tensor for each item in tuple, except metadata
+    which is returned as a single list
+    """
+    im = [] # in this dataset, always [3 x W x H]
+    label = [] # variable length
+    metadata = []
+    max_labels = 0
+    
+    for batch_item in inputs:
+        im.append(batch_item[0])
+        label.append(batch_item[1])
+        metadata.append(batch_item[2]["ignored_regions"])
+        
+        # keep track of image with largest number of annotations
+        if len(batch_item[1]) > max_labels:
+            max_labels = len(batch_item[1])
+        
+    # collate images        
+    ims = torch.stack(im)
+    
+    # collate labels
+    labels = torch.zeros([len(label),max_labels,5]) - 1
+    for idx in range(len(label)):
+        num_objs = len(label[idx])
+        
+        labels[idx,:num_objs,:] = label[idx]
+        
+    return ims,labels,metadata
+     
 
 if __name__ == "__main__":
     #### Test script here
