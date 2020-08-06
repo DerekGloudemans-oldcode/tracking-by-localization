@@ -34,7 +34,8 @@ data_paths = {
     "test_im":"/home/worklab/Desktop/detrac/DETRAC-test-data",
     "test_lab":"/home/worklab/Desktop/detrac/DETRAC-Test-Annotations-XML-v3",
     "train_partition":"/home/worklab/Desktop/detrac/DETRAC-train-data",
-    "val_partition":"/home/worklab/Desktop/detrac/DETRAC-val-data"   
+    "val_partition":"/home/worklab/Desktop/detrac/DETRAC-val-data",
+    "fast_partition":"/home/worklab/Desktop/detrac/DETRAC-short-data"
     }
 
 directories = ["/home/worklab/Documents/code/tracking-by-localization/config",

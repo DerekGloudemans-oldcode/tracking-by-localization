@@ -31,6 +31,8 @@ try:
 except:
     from detrac_plot import pil_to_cv, plot_bboxes_2d,plot_text
 
+
+
 class Detection_Dataset(data.Dataset):
     """
     Creates an object for referencing the UA-Detrac 2D object tracking dataset
@@ -44,16 +46,50 @@ class Detection_Dataset(data.Dataset):
         image dir - (string) - a directory containing a subdirectory for each track sequence
         label dir - (string) - a directory containing a label file per sequence
         """
+        self.classes = 13
+        self.class_dict = {
+            'Sedan':0,
+            'Hatchback':1,
+            'Suv':2,
+            'Van':3,
+            'Police':4,
+            'Taxi':5,
+            'Bus':6,
+            'Truck-Box-Large':7,
+            'MiniVan':8,
+            'Truck-Box-Med':9,
+            'Truck-Util':10,
+            'Truck-Pickup':11,
+            'Truck-Flatbed':12,
+            "None":13,
+            
+            0:'Sedan',
+            1:'Hatchback',
+            2:'Suv',
+            3:'Van',
+            4:'Police',
+            5:'Taxi',
+            6:'Bus',
+            7:'Truck-Box-Large',
+            8:'MiniVan',
+            9:'Truck-Box-Med',
+            10:'Truck-Util',
+            11:'Truck-Pickup',
+            12:'Truck-Flatbed',
+            13:"None"
+            }
+        
+        
         self.im_tf = transforms.Compose([
                 transforms.RandomApply([
-                    transforms.ColorJitter(brightness = 0.3,contrast = 0.3,saturation = 0.2)
+                    transforms.ColorJitter(brightness = 0.6,contrast = 0.6,saturation = 0.5)
                         ]),
                 transforms.ToTensor(),
-                transforms.RandomErasing(p=0.2, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
-                transforms.RandomErasing(p=0.2, scale=(0.02, 0.07), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
-                transforms.RandomErasing(p=0.2, scale=(0.02, 0.05), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
-                transforms.RandomErasing(p=0.1, scale=(0.02, 0.15), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
-                transforms.RandomErasing(p=0.2, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
+                # transforms.RandomErasing(p=0.2, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
+                # transforms.RandomErasing(p=0.2, scale=(0.02, 0.07), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
+                # transforms.RandomErasing(p=0.2, scale=(0.02, 0.05), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
+                # transforms.RandomErasing(p=0.1, scale=(0.02, 0.15), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
+                # transforms.RandomErasing(p=0.2, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
 
                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
@@ -125,7 +161,10 @@ class Detection_Dataset(data.Dataset):
         cur = self.all_data[index]
         im = Image.open(cur[0])
         label = cur[1]
-        metadata = cur[2]
+        ignored = cur[2]['ignored_regions']
+        if len(ignored) > 0:
+            ignored = torch.from_numpy(np.stack(ignored))
+        
         
         if len(label) > 0:
             bboxes = []
@@ -147,13 +186,32 @@ class Detection_Dataset(data.Dataset):
         if FLIP > 0.5:
             im= F.hflip(im)
             # reverse coords and also switch xmin and xmax
-            y[:,0] = im.size[0] - y[:,0]
-            y[:,2] = im.size[0] - y[:,2]
-                
+            new_y = torch.clone(y)
+            new_y[:,0] = im.size[0] - y[:,2]
+            new_y[:,2] = im.size[0] - y[:,0]
+            y = new_y
+            
+            if len(ignored) > 0:
+                print(ignored)
+                new_ig = torch.clone(ignored)
+                new_ig[:,0] = im.size[0] - ignored[:,2]
+                new_ig[:,2] = im.size[0] - ignored[:,0]
+                ignored = new_ig
         
         # convert image and label to tensors
         im_t = self.im_tf(im)
-        return im_t, y,metadata
+        
+        # mask out ignored regions with random pixels
+        for region in ignored:
+            r =  torch.normal(0.485,0.229,[int(region[3])-int(region[1]),int(region[2])-int(region[0])])
+            g =  torch.normal(0.456,0.224,[int(region[3])-int(region[1]),int(region[2])-int(region[0])])
+            b =  torch.normal(0.406,0.225,[int(region[3])-int(region[1]),int(region[2])-int(region[0])])
+            rgb = torch.stack([r,g,b])
+            im_t[:,int(region[1]):int(region[3]),int(region[0]):int(region[2])] = rgb 
+                
+        
+        
+        return im_t, y
     
     def parse_labels(self,label_file):
         """
@@ -261,6 +319,33 @@ class Detection_Dataset(data.Dataset):
                 }
         return all_boxes, sequence_metadata
     
+    
+    def num_classes(self):
+        return self.classes
+    
+    def label_to_name(self,num):
+        return class_dict[num]
+        
+    def load_annotations(self,idx):
+        """
+        Loads labels in format for mAP evaluation 
+        list of arrays, one [n_detections x 4] array per class
+        """
+        annotation = [[] for i in range(self.classes)]
+        
+        label = self.all_data[idx][1]
+        
+        for obj in label:
+            cls = int(obj['class_num'])
+            annotation[cls].append(obj['bbox'].astype(float))
+        
+        for idx in range(len(annotation)):
+            if len(annotation[idx]) > 0:
+                annotation[idx] = np.stack(annotation[idx])
+            else:
+                annotation[idx] = np.empty(0)
+        return annotation
+    
     def show(self,index):
         """ plots all frames in track_idx as video
             SHOW_LABELS - if True, labels are plotted on sequence
@@ -269,7 +354,7 @@ class Detection_Dataset(data.Dataset):
         mean = np.array([0.485, 0.456, 0.406])
         stddev = np.array([0.229, 0.224, 0.225])
         
-        im,label,metadata = self[index]
+        im,label = self[index]
         
         im = self.denorm(im)
         cv_im = np.array(im) 
@@ -291,6 +376,14 @@ class Detection_Dataset(data.Dataset):
             (0,255,50),
             (0,100,255),
             (0,50,255),
+            (255,150,0),
+            (255,100,0),
+            (255,50,0),
+            (0,255,150),
+            (0,255,100),
+            (0,255,50),
+            (0,100,255),
+            (0,50,255),
             (200,200,200) #ignored regions
             ]
         
@@ -301,9 +394,9 @@ class Detection_Dataset(data.Dataset):
             plot_text(cv_im,(bbox[0],bbox[1]),bbox[4],0,class_colors,class_dict)
         
         
-        for region in metadata["ignored_regions"]:
-            bbox = region.astype(int)
-            cv2.rectangle(cv_im,(bbox[0],bbox[1]),(bbox[2],bbox[3]), class_colors[-1], 1)
+        # for region in metadata["ignored_regions"]:
+        #     bbox = region.astype(int)
+        #     cv2.rectangle(cv_im,(bbox[0],bbox[1]),(bbox[2],bbox[3]), class_colors[-1], 1)
        
     
         cv2.imshow("Frame",cv_im)

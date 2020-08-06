@@ -16,6 +16,7 @@ import numpy as np
 import random 
 import math
 import time
+import cv2
 random.seed = 0
 
 import cv2
@@ -38,16 +39,56 @@ for item in directories:
     sys.path.insert(0,item)
 
 from _data_utils.detrac.detrac_detection_dataset import Detection_Dataset, class_dict, collate
-from _detectors.pytorch_retinanet.retinanet import model
+from _detectors.pytorch_retinanet.retinanet import model, csv_eval
 from config.data_paths import data_paths
 
 # surpress XML warnings
 import warnings
 warnings.filterwarnings(action='once')
 
+def plot_detections(dataset,retinanet):
+    """
+    Plots detections output
+    """
+    retinanet.training = False
+    retinanet.eval()
+
+    idx = np.random.randint(0,len(dataset))
+    
+    im,label,meta = dataset[idx]
+    
+    im = im.to(device).unsqueeze(0).float()
+    
+    
+    
+    with torch.no_grad():
+
+        scores,labels, boxes = retinanet(im)
 
 
-
+    im = dataset.denorm(im[0])
+    cv_im = np.array(im.cpu()) 
+    cv_im = np.clip(cv_im, 0, 1)
+        
+    # Convert RGB to BGR 
+    cv_im = cv_im[::-1, :, :]  
+        
+    im = cv_im.transpose((1,2,0))
+    
+    
+        
+       
+        
+               
+    
+    for box in boxes:
+        box = box.int()
+        im = cv2.rectangle(im,(box[0],box[1]),(box[2],box[3]),(0.5,0.5,0.5),2)
+    cv2.imshow("Frame",im)
+    cv2.waitKey(10)
+        
+    retinanet.train()
+    retinanet.module.freeze_bn()
 
 if __name__ == "__main__":
    
@@ -62,6 +103,10 @@ if __name__ == "__main__":
     label_dir       = data_paths["train_lab"]
     train_partition = data_paths["train_partition"]
     val_partition  = data_paths["val_partition"]
+    
+    # faster setup for quick iteration
+    val_partition = data_paths["fast_partition"]
+    train_partition = data_paths["fast_partition"]
     
     ###########################################################################
     
@@ -83,17 +128,20 @@ if __name__ == "__main__":
     if checkpoint_file is not None:
         retinanet.load_state_dict(torch.load(checkpoint_file).state_dict())
     
-    # get dataloaders
-    train_data = Detection_Dataset(train_partition,label_dir)
-    val_data = Detection_Dataset(val_partition,label_dir)
-    params = {'batch_size' : 8,
-          'shuffle'    : True,
-          'num_workers': 0,
-          'drop_last'  : True,
-          'collate_fn' : collate
-          }
-    trainloader = data.DataLoader(train_data,**params)
-    testloader = data.DataLoader(val_data,**params)
+    try:
+        train_data
+    except:
+        # get dataloaders
+        train_data = Detection_Dataset(train_partition,label_dir)
+        val_data = Detection_Dataset(val_partition,label_dir)
+        params = {'batch_size' : 8,
+              'shuffle'    : True,
+              'num_workers': 0,
+              'drop_last'  : True,
+              'collate_fn' : collate
+              }
+        trainloader = data.DataLoader(train_data,**params)
+        testloader = data.DataLoader(val_data,**params)
     
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
@@ -121,9 +169,13 @@ if __name__ == "__main__":
     retinanet.module.freeze_bn()
 
     loss_hist = collections.deque(maxlen=500)
+    most_recent_mAP = 0
+    
     print('Num training images: {}'.format(len(train_data)))
 
     for epoch_num in range(start_epoch,max_epochs):
+
+    
         print("Starting epoch {}".format(epoch_num))
         
         retinanet.train()
@@ -158,11 +210,13 @@ if __name__ == "__main__":
 
                 epoch_loss.append(float(loss))
                 
-                if iter_num % 1 == 0:
+                if iter_num % 10 == 0:
                     print(
                         'Epoch: {} | Iteration: {} | Classification loss: {:1.5f} | Regression loss: {:1.5f} | Running loss: {:1.5f}'.format(
                             epoch_num, iter_num, float(classification_loss), float(regression_loss), np.mean(loss_hist)))
-
+                if iter_num % 100 == 0:
+                    plot_detections(val_data, retinanet)
+                    
                 del classification_loss
                 del regression_loss
             except Exception as e:
@@ -171,20 +225,10 @@ if __name__ == "__main__":
         
         print("Epoch {} training complete".format(epoch_num))
         print("Evaluating on validation dataset")
-        # if parser.dataset == 'coco':
-
-        #     print('Evaluating dataset')
-
-        #     coco_eval.evaluate_coco(dataset_val, retinanet)
-
-        # elif parser.dataset == 'csv' and parser.csv_val is not None:
-
-        #     print('Evaluating dataset')
-
-        #     mAP = csv_eval.evaluate(dataset_val, retinanet)
+        most_recent_mAP = csv_eval.evaluate(val_data,retinanet,iou_threshold = 0.7)
 
         scheduler.step(np.mean(epoch_loss))
-        
+        torch.cuda.empty_cache()
         #save
         PATH = "detrac_retinanet_epoch{}.pt".format(epoch_num)
         torch.save({
@@ -196,6 +240,6 @@ if __name__ == "__main__":
 
     retinanet.eval()
 
-    torch.save(retinanet, 'model_final.pt')
-    
+    #torch.save(retinanet, 'model_final.pt')
+    most_recent_mAP = csv_eval.evaluate(val_data,retinanet,iou_threshold = 0.7)
     
