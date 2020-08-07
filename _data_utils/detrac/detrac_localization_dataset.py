@@ -458,8 +458,8 @@ if __name__ == "__main__":
     try:
         test
     except:
-        image_dir = "/home/worklab/Data/cv/Detrac/DETRAC-train-data"
-        label_dir = "/home/worklab/Data/cv/Detrac/DETRAC-Train-Annotations-XML-v3"
+        image_dir = "/home/worklab/Desktop/detrac/DETRAC-train-data"
+        label_dir = "/home/worklab/Desktop/detrac/DETRAC-Train-Annotations-XML-v3"
         test = Localize_Dataset(image_dir,label_dir)
     for i in range(10):
         idx = np.random.randint(0,len(test))

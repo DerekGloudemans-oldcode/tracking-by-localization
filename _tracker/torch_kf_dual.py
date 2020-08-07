@@ -17,7 +17,7 @@ class Torch_KF(object):
     using tensor operations
     """
     
-    def __init__(self,device,state_err = 10000, meas_err = 1, mod_err = 1, INIT = None):
+    def __init__(self,device,state_err = 10000, meas_err = 1, mod_err = 1, INIT = None, ADD_MEAN_Q = False, ADD_MEAN_R = False):
         """
         Parameters
         ----------
@@ -38,6 +38,7 @@ class Torch_KF(object):
         self.state_size = 7
         self.t = 1/15.0
         self.device = device
+        self.X = None
         
         self.P0 = torch.zeros(self.state_size,self.state_size) # state covariance
         self.F = torch.zeros(self.state_size,self.state_size) # dynamical model
@@ -81,9 +82,11 @@ class Torch_KF(object):
             self.meas_size  =  self.H.shape[0]
             
             #overwrite means
-            self.mu_Q  = torch.zeros([1,self.state_size])
-            self.mu_R  = torch.zeros([1,self.meas_size])
-            self.mu_R2 = torch.zeros([1,self.meas_size])
+            if not ADD_MEAN_Q:
+                self.mu_Q  = torch.zeros([1,self.state_size])
+            if not ADD_MEAN_R:
+                self.mu_R  = torch.zeros([1,self.meas_size])
+                self.mu_R2 = torch.zeros([1,self.meas_size])
 
        
         # move to device
@@ -112,11 +115,17 @@ class Torch_KF(object):
         """
         
         newX = torch.zeros((len(detections),self.state_size)) 
-        try:
-            newX[:,:self.meas_size] = torch.from_numpy(detections).to(self.device)
-        except:
-            newX[:,:self.meas_size] = detections.to(self.device)
-            
+        if len(detections[0]) == self.meas_size:
+            try:
+                newX[:,:self.meas_size] = torch.from_numpy(detections).to(self.device)
+            except:
+                newX[:,:self.meas_size] = detections.to(self.device)
+        else: # case where velocity estimates are given
+            try:
+                newX = torch.from_numpy(detections).to(device)
+            except:
+                newX = detections.to(self.device)
+                
         newP = self.P0.repeat(len(obj_ids),1,1)
 
         # store state and initialize P with defaults
@@ -126,7 +135,7 @@ class Torch_KF(object):
             self.P = torch.cat((self.P,newP), dim = 0)
         except:
             new_idx = 0
-            self.X = newX.to(self.device)
+            self.X = newX.to(self.device).float()
             self.P = newP.to(self.device)
             
         # add obj_ids to dictionary
@@ -145,22 +154,22 @@ class Torch_KF(object):
         ----------
         obj_ids : list of (int) object ids
         """
+        if self.X is not None:
+            keepers = list(range(len(self.X)))
+            for id in obj_ids:
+                keepers.remove(self.obj_idxs[id])
+                self.obj_idxs[id] = None    
+            keepers.sort()
+            
+            self.X = self.X[keepers,:]
+            self.P = self.P[keepers,:]
         
-        keepers = list(range(len(self.X)))
-        for id in obj_ids:
-            keepers.remove(self.obj_idxs[id])
-            self.obj_idxs[id] = None    
-        keepers.sort()
-        
-        self.X = self.X[keepers,:]
-        self.P = self.P[keepers,:]
-    
-        # since rows were deleted from X and P, shift idxs accordingly
-        new_id = 0
-        for id in self.obj_idxs:
-            if self.obj_idxs[id] is not None:
-                self.obj_idxs[id] = new_id
-                new_id += 1
+            # since rows were deleted from X and P, shift idxs accordingly
+            new_id = 0
+            for id in self.obj_idxs:
+                if self.obj_idxs[id] is not None:
+                    self.obj_idxs[id] = new_id
+                    new_id += 1
     
     def predict(self):
         """

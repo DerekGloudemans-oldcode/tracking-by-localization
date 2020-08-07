@@ -192,7 +192,6 @@ class Detection_Dataset(data.Dataset):
             y = new_y
             
             if len(ignored) > 0:
-                print(ignored)
                 new_ig = torch.clone(ignored)
                 new_ig[:,0] = im.size[0] - ignored[:,2]
                 new_ig[:,2] = im.size[0] - ignored[:,0]
@@ -211,7 +210,7 @@ class Detection_Dataset(data.Dataset):
                 
         
         
-        return im_t, y
+        return im_t, y,ignored
     
     def parse_labels(self,label_file):
         """
@@ -448,7 +447,7 @@ def collate(inputs):
     for batch_item in inputs:
         im.append(batch_item[0])
         label.append(batch_item[1])
-        metadata.append(batch_item[2]["ignored_regions"])
+        metadata.append(batch_item[2])
         
         # keep track of image with largest number of annotations
         if len(batch_item[1]) > max_labels:

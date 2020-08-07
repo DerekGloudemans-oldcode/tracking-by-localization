@@ -14,18 +14,22 @@ data_paths = {
     "test_im":"/home/worklab/Data/cv/Detrac/DETRAC-test-data",
     "test_lab":"/home/worklab/Data/cv/Detrac/DETRAC-Test-Annotations-XML-v3",
     "train_partition":"/home/worklab/Data/cv/Detrac/detrac_train_partition",
-    "val_partition":"/home/worklab/Data/cv/Detrac/detrac_val_partition"  
+    "val_partition":"/home/worklab/Data/cv/Detrac/detrac_val_partition"
     }
 
 directories = ["/home/worklab/Documents/derek/tracking-by-localization/config",
                "/home/worklab/Documents/derek/tracking-by-localization/data/detrac_detections",
                "/home/worklab/Documents/derek/tracking-by-localization/_data_utils",
+               "/home/worklab/Documents/derek/tracking-by-localization/_data_utils/detrac",
                "/home/worklab/Documents/derek/tracking-by-localization/_detectors",
                "/home/worklab/Documents/derek/tracking-by-localization/_eval",
                "/home/worklab/Documents/derek/tracking-by-localization/_localizers",
                "/home/worklab/Documents/derek/tracking-by-localization/_train",
                "/home/worklab/Documents/derek/tracking-by-localization/_tracker"             
                ]
+
+
+
 
 # 2 x GTX 1080 Ti machine
 data_paths = {
@@ -35,17 +39,18 @@ data_paths = {
     "test_lab":"/home/worklab/Desktop/detrac/DETRAC-Test-Annotations-XML-v3",
     "train_partition":"/home/worklab/Desktop/detrac/DETRAC-train-data",
     "val_partition":"/home/worklab/Desktop/detrac/DETRAC-val-data",
-    "fast_partition":"/home/worklab/Desktop/detrac/DETRAC-short-data"
+    "fast_partition":"/home/worklab/Desktop/detrac/DETRAC-short-data",
+    "filter_params":"/home/worklab/Documents/code/tracking-by-localization/config/filter_params"
     }
 
 directories = ["/home/worklab/Documents/code/tracking-by-localization/config",
                "/home/worklab/Documents/code/tracking-by-localization/data/detrac_detections",
                "/home/worklab/Documents/code/tracking-by-localization/_data_utils",
+               "/home/worklab/Documents/code/tracking-by-localization/_data_utils/detrac",
                "/home/worklab/Documents/code/tracking-by-localization/_detectors",
                "/home/worklab/Documents/code/tracking-by-localization/_eval",
                "/home/worklab/Documents/code/tracking-by-localization/_localizers",
                "/home/worklab/Documents/code/tracking-by-localization/_train",
                "/home/worklab/Documents/code/tracking-by-localization/_tracker",
                "/home/worklab/Documents/code/tracking-by-localization/_detectors/pytorch_retinanet"
-               
                ]

@@ -21,6 +21,7 @@ from torchvision.transforms import functional as F
 
 import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
+from scipy.signal import savgol_filter
 
 
 sys.path.insert(0,os.getcwd)
@@ -84,16 +85,35 @@ class Track_Dataset(data.Dataset):
                         
             # get rid of object ids and just keep list of bboxes, important to do this every track because ids repeat
             for id in objects:
-                label_list.append(np.array(objects[id]['box']))
-                im_list.append(objects[id]['im'])
-                
+                if len(objects[id]['box']) > self.n:
+                    label_list.append(np.array(objects[id]['box']))
+                    im_list.append(objects[id]['im'])
+               
         self.label_list = label_list
         self.im_list = im_list
+        
+    
         # parse_labels returns a list (one frame per index) of lists, where 
         # each item in the sublist is one object
         # so we need to go through and keep a running record of all objects, indexed by id
             
-        
+        with_speed = []
+        for bboxes in self.label_list:     
+            speeds = np.zeros(bboxes.shape)  
+            speeds[:len(speeds)-1,:] = bboxes[1:,:] - bboxes[:len(bboxes)-1,:]
+            speeds[-1,:] = speeds[-2,:]
+
+            try:
+                speeds = savgol_filter(speeds,5,2,axis = 0)
+            except:
+                print(speeds.shape)
+                print(bboxes.shape)
+            #plt.plot(speeds[:,0])
+            #plt.legend(["Unsmoothed","Smoothed"])
+            #plt.show()
+            combined = np.concatenate((bboxes,speeds),axis = 1)
+            with_speed.append(combined)
+        self.label_list = with_speed
         
         
 

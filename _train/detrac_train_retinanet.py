@@ -64,7 +64,12 @@ def plot_detections(dataset,retinanet):
     with torch.no_grad():
 
         scores,labels, boxes = retinanet(im)
-
+    
+    keep = []    
+    for i in range(len(scores)):
+        if scores[i] > 0.5:
+            keep.append(i)
+    boxes = boxes[keep,:]
 
     im = dataset.denorm(im[0])
     cv_im = np.array(im.cpu()) 
@@ -75,20 +80,15 @@ def plot_detections(dataset,retinanet):
         
     im = cv_im.transpose((1,2,0))
     
-    
-        
-       
-        
-               
-    
     for box in boxes:
         box = box.int()
-        im = cv2.rectangle(im,(box[0],box[1]),(box[2],box[3]),(0.5,0.5,0.5),2)
+        im = cv2.rectangle(im,(box[0],box[1]),(box[2],box[3]),(0.7,0.3,0.2),1)
     cv2.imshow("Frame",im)
-    cv2.waitKey(10)
+    cv2.waitKey(2000)
         
     retinanet.train()
     retinanet.module.freeze_bn()
+    
 
 if __name__ == "__main__":
    
@@ -105,8 +105,8 @@ if __name__ == "__main__":
     val_partition  = data_paths["val_partition"]
     
     # faster setup for quick iteration
-    val_partition = data_paths["fast_partition"]
-    train_partition = data_paths["fast_partition"]
+    # val_partition = data_paths["fast_partition"]
+    # train_partition = data_paths["fast_partition"]
     
     ###########################################################################
     
@@ -159,7 +159,7 @@ if __name__ == "__main__":
 
     retinanet.training = True
     # define optimizer and lr scheduler
-    optimizer = optim.Adam(retinanet.parameters(), lr=1e-50)
+    optimizer = optim.Adam(retinanet.parameters(), lr=1e-5)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=patience, verbose=True, mode = "max")
 
