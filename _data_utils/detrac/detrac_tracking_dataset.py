@@ -42,7 +42,7 @@ class Track_Dataset(data.Dataset):
         label dir - (string) - a directory containing a label file per sequence
         """
         self.n = n
-        
+        self.frame_objs = {}
         # parse labels and store in dict keyed by track name
         label_list = []
         im_list = []
@@ -73,9 +73,13 @@ class Track_Dataset(data.Dataset):
                     new_bbox[2] = (bbox[2] - bbox[0])
                     new_bbox[3] = (bbox[3] - bbox[1])/new_bbox[2]
                     
-                    
+                    try:
+                        self.frame_objs[path].append(new_bbox)
+                    except:
+                        self.frame_objs[path] = [new_bbox]
                     
                     if id in objects.keys():
+
                         objects[id]['box'].append(new_bbox)
                         objects[id]["im"].append(path)
                     else:

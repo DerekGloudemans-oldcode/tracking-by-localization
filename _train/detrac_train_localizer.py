@@ -206,6 +206,22 @@ class Box_Loss(nn.Module):
         iou = intersection / (union + epsilon)
         #iou = torch.clamp(iou,0)
         return 1- iou.sum()/(len(iou)+epsilon)
+    
+class Width_Loss(nn.Module):        
+    def __init__(self):
+        super(Width_Loss,self).__init__()
+        
+    def forward(self,output,target,epsilon = 1e-07):
+        """ Compute the bbox iou loss for target vs output using tensors to preserve
+        gradients for efficient backpropogation"""
+        
+        # minx miny maxx maxy
+        pred_width = output[:,2]-output[:,0]
+        targ_width = target[:,2]-target[:,0]
+        error = torch.abs(pred_width - targ_width) / targ_width
+        loss  = error.mean()
+
+        return loss
   
 def plot_batch(model,batch,class_dict):
     """
@@ -281,7 +297,7 @@ def plot_batch(model,batch,class_dict):
     plt.close()
 
 def move_dual_checkpoint_to_cpu(model,optimizer,checkpoint):
-    model,optimizer,epoch,all_metrics = load_model(checkpoint_file, model, optimizer)
+    model,optimizer,epoch,all_metrics = load_model(checkpoint, model, optimizer)
     model = nn.DataParallel(model,device_ids = [0])
     model = model.to(device)
     
@@ -326,9 +342,9 @@ if __name__ == "__main__":
     
     # 2. load model
     model = ResNet34_Localizer()
-    #cp = "/home/worklab/Data/cv/checkpoints/cpu_detrac_resnet34_epoch7.pt"
-    #cp = torch.load(cp)
-    #model.load_state_dict(cp['model_state_dict'])
+    cp = "cpu_detrac_resnet34_alpha.pt"
+    cp = torch.load(cp)
+    model.load_state_dict(cp['model_state_dict'])
 
     if MULTI:
         model = nn.DataParallel(model,device_ids = [0,1])
@@ -339,7 +355,9 @@ if __name__ == "__main__":
     # 3. create training params
     params = {'batch_size' : 64,
               'shuffle'    : True,
-              'num_workers': 0,
+              'num_workers' #cp = "detrac_resnet34_alpha.pt"
+    #cp = torch.load(cp)
+    #model.load_state_dict(cp['model_state_dict']): 0,
               'drop_last'  : True
               }
     
@@ -354,7 +372,9 @@ if __name__ == "__main__":
     trainloader = data.DataLoader(train_data, **params)
     testloader = data.DataLoader(test_data, **params)
     
-    # group dataloaders
+    # group dataloaders #cp = "detrac_resnet34_alpha.pt"
+    #cp = torch.load(cp)
+    #model.load_state_dict(cp['model_state_dict'])
     dataloaders = {"train":trainloader, "val": testloader}
     datasizes = {"train": len(train_data), "val": len(test_data)}
     print("Got dataloaders. {},{}".format(datasizes['train'],datasizes['val']))
@@ -377,7 +397,7 @@ if __name__ == "__main__":
      
     # 9. define losses
     losses = {"cls": [nn.CrossEntropyLoss()],
-              "reg": [nn.MSELoss(), Box_Loss(),]
+              "reg": [Width_Loss(), Box_Loss(),]
               }
     # losses = {"cls": [],
     #             "reg": [nn.MSELoss,Box_Loss()]
