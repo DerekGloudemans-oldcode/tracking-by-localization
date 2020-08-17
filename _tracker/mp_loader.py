@@ -136,25 +136,25 @@ def load_to_queue(image_queue,files,det_step,init_frames,device,queue_size):
             # load next image
             with Image.open(files[frame_idx]) as im:
              
-              if frame_idx % det_step.value < init_frames:   
-                  # convert to CV2 style image
-                  open_cv_image = np.array(im) 
-                  im = open_cv_image.copy() 
-                  original_im = im[:,:,[2,1,0]].copy()
-                  # new stuff
-                  dim = (im.shape[1], im.shape[0])
-                  im = cv2.resize(im, (1024,1024))
-                  im = im.transpose((2,0,1)).copy()
-                  im = torch.from_numpy(im).float().div(255.0).unsqueeze(0)
-                  dim = torch.FloatTensor(dim).repeat(1,2)
-                  dim = dim.to(device,non_blocking = True)
-              else:
-                  # keep as tensor
-                  original_im = np.array(im)[:,:,[2,1,0]].copy()
-                  im = F.to_tensor(im)
-                  im = F.normalize(im,mean=[0.485, 0.456, 0.406],
-                                      std=[0.229, 0.224, 0.225])
-                  dim = None
+              # if frame_idx % det_step.value < init_frames:   
+              #     # convert to CV2 style image
+              #     open_cv_image = np.array(im) 
+              #     im = open_cv_image.copy() 
+              #     original_im = im[:,:,[2,1,0]].copy()
+              #     # new stuff
+              #     dim = (im.shape[1], im.shape[0])
+              #     im = cv2.resize(im, (1024,1024))
+              #     im = im.transpose((2,0,1)).copy()
+              #     im = torch.from_numpy(im).float().div(255.0).unsqueeze(0)
+              #     dim = torch.FloatTensor(dim).repeat(1,2)
+              #     dim = dim.to(device,non_blocking = True)
+              # else:
+                # keep as tensor
+              original_im = np.array(im)[:,:,[2,1,0]].copy()
+              im = F.to_tensor(im)
+              im = F.normalize(im,mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225])
+              dim = None
                  
               # store preprocessed image, dimensions and original image
               im = im.to(device)

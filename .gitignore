@@ -6,3 +6,7 @@ data/detrac_detections/ACF-test/ACF/
 *.pt
 
 *.pyc
+
+data/tracking_outputs/
+
+data/tracking_outputs_train_retina/
