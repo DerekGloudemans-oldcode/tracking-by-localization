@@ -10,3 +10,7 @@ data/detrac_detections/ACF-test/ACF/
 data/tracking_outputs/
 
 data/tracking_outputs_train_retina/
+
+data/tracking_outputs_test_retina/
+
+data/tracking_outputs_train_ACF/

@@ -48,7 +48,7 @@ class Mock_Detector():
             have a train and a test folder (ex. ACF-train/, ACF-test/)
         detctor - string
             Indicates which set of precomputed detections should be used. 
-            Must be one of: ACF, DPM, R-CNN, CompACT, groundtruth
+            Must be one of: ACF, DPM, R-CNN, CompACT, ground-truth
         """
         
         sub_directory = os.path.join(directory,detector)
@@ -59,7 +59,7 @@ class Mock_Detector():
                                "DPM":1/0.17,
                                "R-CNN":1/0.1,
                                "CompACT":1/0.22,
-                               "groundtruth":0
+                               "ground-truth":0
                                }
         
         # store all labels
@@ -69,22 +69,25 @@ class Mock_Detector():
         
         
         
-        for track_detections in sub_directory:
+        for track_detections in os.listdir(sub_directory):
             
             # allocate storage for up to 10000 frames (one list per frame)
             track_data = [[] for i in range(10000)]
             
             # get data from file
             id = int(track_detections.split("_")[1])
-            with open(track_detections,"rb") as f:
+            with open(os.path.join(sub_directory,track_detections),"r") as f:
                 content = [i.strip() for i in f.readlines()]
             
             # transfer to list of lists
             for obj in content:
-                obj = obj.split(" ")
+                obj = obj.split(",")
                 obj = [float(num) for num in obj]
                 frame = int(obj[0])
                 bbox = torch.tensor([obj[2],obj[3],obj[4],obj[5],obj[1],obj[6]])
+                
+                
+                
                 track_data[frame].append(bbox)
             
             # parse list into single tensor and add
@@ -94,12 +97,12 @@ class Mock_Detector():
                     bboxes = torch.stack(item)
                     track_dict[i] = bboxes
                 else:
-                    track_dict[i] = torch.empty()
+                    track_dict[i] = torch.empty(1)
             
             # add track_dict to all_data
             self.all_data[id] = track_dict.copy()
             
-    def detect(self,track_id,frame):
+    def __call__(self,track_id,frame):
         """
         Simulates the detector by returning the detector's output
 
@@ -118,13 +121,38 @@ class Mock_Detector():
         time - float, average time taken by detector
         """
         
-        data = self.all_data[track_id][frame]
+        frame_data = self.all_data[track_id][frame]
         
-        scores = data[:,5]
-        labels = data[:,4]
-        bboxes = data[:,:4]
-        time = self.detector_times[self.detector]
-        
-        return scores,labels,bboxes,time
-
+        try: # get detections
+            scores = frame_data[:,5]
+            labels = frame_data[:,4]
+            bboxes = frame_data[:,:4]
             
+            # convert xywh -> xyxy
+            new_bboxes = torch.zeros(bboxes.shape)
+            new_bboxes[:,0] = bboxes[:,0] 
+            new_bboxes[:,1] = bboxes[:,1] 
+            new_bboxes[:,2] = bboxes[:,0] + bboxes[:,2]
+            new_bboxes[:,3] = bboxes[:,1] + bboxes[:,3]
+            bboxes = new_bboxes
+            
+        except: # no detections or frame DNE
+            scores = []
+            labels = []
+            bboxes = []
+            
+        det_time = self.detector_times[self.detector]
+        
+        return scores,labels,bboxes,det_time
+            
+    def to(self,device):
+        """
+        Implemented to prevent errors in code execution, det = det.to(device) does nothing
+        """
+        return self
+    
+    def eval(self):
+        """
+        Implemented to prevent errors in code execution, det.eval() does nothing
+        """
+        pass
