@@ -936,7 +936,7 @@ if __name__ == "__main__":
                     n_iterations = 10,
                     ber = 2.0,
                     skew_ratio = 0,
-                    PLOT = False)
+                    PLOT = True)
 
 
     #%% Fit R2 for detector
