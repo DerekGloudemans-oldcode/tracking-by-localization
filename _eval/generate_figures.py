@@ -316,15 +316,18 @@ plt.style.use('default')
 
 with open("/home/worklab/Documents/code/tracking-by-localization/_eval/multiple_threshold_results.cpkl","rb") as f:
     all_results,all_APs,all_ARs = pickle.load(f)
-    
-    
+
+colors = np.zeros([12,3])
+for i in range(len(colors)):
+    colors[i] = np.array([0.1,1,0.2]) + i/12* np.array([0.8,-1,0])
+colors = colors[::-1,:]  
 legend = [1-i for i in iou_reqs]
 means = np.mean(all_results,axis = 0)
 means = np.transpose(means)
 plt.figure()
-for row in means:
-    plt.plot(det_steps,row)
-    plt.legend(legend, title = "Minimum IoU for Match")
+for j,row in enumerate(means):
+    plt.plot(det_steps,row,color = colors[j])
+plt.legend(legend, title = "Minimum IoU for Match")
 plt.xlabel("Frames Between Detection",fontsize = 20)
 plt.ylabel("MOTA",fontsize = 20)
     
@@ -333,9 +336,9 @@ legend = [1-i for i in iou_reqs]
 means = np.mean(all_APs,axis = 0)
 means = np.transpose(means)
 plt.figure()
-for row in means:
-    plt.plot(det_steps,row)
-    plt.legend(legend, title = "Minimum IoU for Match")
+for j,row in enumerate(means):
+    plt.plot(det_steps,row,color = colors[j])
+plt.legend(legend, title = "Minimum IoU for Match")
 plt.xlabel("Frames Between Detection",fontsize = 20)
 plt.ylabel("Precision",fontsize = 20)
 
@@ -343,9 +346,9 @@ legend = [1-i for i in iou_reqs]
 means = np.mean(all_ARs,axis = 0)
 means = np.transpose(means)
 plt.figure()
-for row in means:
-    plt.plot(det_steps,row)
-    plt.legend(legend, title = "Minimum IoU for Match")
+for j,row in enumerate(means):
+    plt.plot(det_steps,row,color = colors[j])
+plt.legend(legend, title = "Minimum IoU for Match")
 plt.xlabel("Frames Between Detection",fontsize = 20)
 plt.ylabel("Recall",fontsize = 20)
 

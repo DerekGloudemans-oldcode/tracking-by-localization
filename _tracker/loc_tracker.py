@@ -101,7 +101,7 @@ class Localization_Tracker():
             self.localizer = localizer.to(self.device)
             localizer.eval()
         except:
-            pass
+            self.localizer = None
         
         self.detector = detector.to(self.device)
         detector.eval()
