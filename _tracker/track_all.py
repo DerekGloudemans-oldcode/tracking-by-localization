@@ -63,14 +63,15 @@ if __name__ == "__main__":
         TRAIN = args["TRAIN"]
      except:
          TRAIN = False
-     for det in ["DPM"]:
-         for det_step in [1,3,5,9,15,21,29,35,45]: 
+     #for det_conf_cutoff in [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
+         for det_step in [1,2,3,4,5,6,7]: 
                 
-                print("Beginning tracking with {}".format(det))
+                #print("Beginning tracking with {}".format(det))
                 # input parameters
+                det = "retinanet"
                 overlap = 0.2
                 iou_cutoff = 0.75
-                #det_step = 7
+                #det_step = 9
                 ber = 1.95
                 init_frames = 1
                 matching_cutoff = 100
@@ -118,6 +119,9 @@ if __name__ == "__main__":
                 cp = torch.load(loc_cp)
                 localizer.load_state_dict(cp['model_state_dict']) 
                 
+                # no localization update!
+                localizer = None
+                
                 # get detector
                 detector = resnet50(num_classes=13, pretrained=True)
                 try:
@@ -130,7 +134,7 @@ if __name__ == "__main__":
                         new[new_key] = temp[key]
                     detector.load_state_dict(new)
                 
-                detector = Mock_Detector(data_paths["detections"],detector = det)
+                #detector = Mock_Detector(data_paths["detections"],detector = det)
                 
                 # get track_dict
                 track_dict = get_track_dict(TRAIN)         
@@ -155,7 +159,7 @@ if __name__ == "__main__":
                                                    det_step = det_step,
                                                    init_frames = init_frames,
                                                    fsld_max = det_step,
-                                                   det_conf_cutoff = 0.35,
+                                                   det_conf_cutoff = 0.2,
                                                    matching_cutoff = matching_cutoff,
                                                    iou_cutoff = iou_cutoff,
                                                    ber = ber,

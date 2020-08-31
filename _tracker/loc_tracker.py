@@ -97,9 +97,13 @@ class Localization_Tracker():
         torch.cuda.empty_cache() 
        
         # store detector and localizer
-        self.localizer = localizer.to(self.device)
+        try:
+            self.localizer = localizer.to(self.device)
+            localizer.eval()
+        except:
+            pass
+        
         self.detector = detector.to(self.device)
-        localizer.eval()
         detector.eval()
        
         # store filter params

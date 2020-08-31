@@ -112,7 +112,7 @@ for key in all_results:
             
 #%% Generate MOTA-Hz plots for all detectors
 plt.style.use('ggplot')
-with open("aggregated_test_results.cpkl","rb") as f:
+with open("/home/worklab/Documents/code/tracking-by-localization/_eval/aggregated_test_results.cpkl","rb") as f:
     agg = pickle.load(f)
     
 plot_dict = {
@@ -251,6 +251,8 @@ plt.ylim([0,1])
 # remove plot
 # divide by total
 
+
+
 #%% Compute MOTA at a variety of IOU requirements
 track_dir = data_paths["test_im"]
 label_dir = data_paths["test_lab"]
@@ -310,9 +312,12 @@ with open("multiple_threshold_results.cpkl","wb") as f:
     pickle.dump((all_results,all_APs,all_ARs),f)
     
 #%% Plot various IOUs
-with open("multiple_threshold_results.cpkl","rb") as f:
-    all_results,all_APs,all_ARs = pickle.load(f)
+plt.style.use('default')
 
+with open("/home/worklab/Documents/code/tracking-by-localization/_eval/multiple_threshold_results.cpkl","rb") as f:
+    all_results,all_APs,all_ARs = pickle.load(f)
+    
+    
 legend = [1-i for i in iou_reqs]
 means = np.mean(all_results,axis = 0)
 means = np.transpose(means)
@@ -342,4 +347,44 @@ for row in means:
     plt.plot(det_steps,row)
     plt.legend(legend, title = "Minimum IoU for Match")
 plt.xlabel("Frames Between Detection",fontsize = 20)
+plt.ylabel("Recall",fontsize = 20)
+
+#%% Plot various IOUs other orientation
+plt.style.use('default')
+
+with open("/home/worklab/Documents/code/tracking-by-localization/_eval/multiple_threshold_results.cpkl","rb") as f:
+    all_results,all_APs,all_ARs = pickle.load(f)
+
+colors = np.zeros([10,3])
+for i in range(len(colors)):
+    colors[i] = np.array([.2,.2,1]) + i/10* np.array([.8,0,-0.8])
+colors[0] = np.array([0.8,0.8,0.1])
+
+iou_reqs = [1-i for i in iou_reqs]
+legend = [i for i in det_steps]
+means = np.mean(all_results,axis = 0)
+plt.figure()
+for j,row in enumerate(means):
+    plt.plot(iou_reqs,row,color = colors[j])
+#plt.legend(legend, title = "d")
+plt.xlabel("Required iou for match",fontsize = 20)
+plt.ylabel("MOTA",fontsize = 20)
+    
+
+legend = [i for i in det_steps]
+means = np.mean(all_APs,axis = 0)
+plt.figure()
+for j,row in enumerate(means):
+    plt.plot(iou_reqs,row,color = colors[j])
+#plt.legend(legend, title = "d")
+plt.xlabel("Required iou for match",fontsize = 20)
+plt.ylabel("Precision",fontsize = 20)
+
+legend = [i for i in det_steps]
+means = np.mean(all_ARs,axis = 0)
+plt.figure()
+for j,row in enumerate(means):
+    plt.plot(iou_reqs,row,color = colors[j])
+#plt.legend(legend, title = "d")
+plt.xlabel("Required iou for match",fontsize = 20)
 plt.ylabel("Recall",fontsize = 20)
