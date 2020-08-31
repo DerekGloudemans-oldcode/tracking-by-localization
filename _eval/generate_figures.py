@@ -321,37 +321,38 @@ colors = np.zeros([12,3])
 for i in range(len(colors)):
     colors[i] = np.array([0.1,1,0.2]) + i/12* np.array([0.8,-1,0])
 colors = colors[::-1,:]  
-legend = [1-i for i in iou_reqs]
+legend = [np.round(1-i,1) for i in iou_reqs]
+
 means = np.mean(all_results,axis = 0)
 means = np.transpose(means)
-plt.figure()
+plt.figure(figsize = (3,6))
 for j,row in enumerate(means):
     plt.plot(det_steps,row,color = colors[j])
-plt.legend(legend, title = "Minimum IoU for Match")
+#plt.legend(legend, title = "Minimum IoU for Match")
 plt.xlabel("Frames Between Detection",fontsize = 20)
 plt.ylabel("MOTA",fontsize = 20)
     
 
-legend = [1-i for i in iou_reqs]
+
 means = np.mean(all_APs,axis = 0)
 means = np.transpose(means)
-plt.figure()
+plt.figure(figsize = (3,6))
 for j,row in enumerate(means):
     plt.plot(det_steps,row,color = colors[j])
-plt.legend(legend, title = "Minimum IoU for Match")
+#plt.legend(legend, title = "Minimum IoU for Match")
 plt.xlabel("Frames Between Detection",fontsize = 20)
 plt.ylabel("Precision",fontsize = 20)
 
-legend = [1-i for i in iou_reqs]
+
 means = np.mean(all_ARs,axis = 0)
 means = np.transpose(means)
-plt.figure()
+plt.figure(figsize = (3,6))
 for j,row in enumerate(means):
     plt.plot(det_steps,row,color = colors[j])
 plt.legend(legend, title = "Minimum IoU for Match")
 plt.xlabel("Frames Between Detection",fontsize = 20)
 plt.ylabel("Recall",fontsize = 20)
-
+plt.xlim([0,200])
 #%% Plot various IOUs other orientation
 plt.style.use('default')
 
