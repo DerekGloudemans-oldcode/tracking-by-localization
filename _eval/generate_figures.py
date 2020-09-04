@@ -55,6 +55,8 @@ all_results = {
                "ground_truth":{}
                }
 
+all_results = ""
+
 
 for sub_dir in os.listdir(result_dir):
     if sub_dir in ["retinanet_test","ACF_test","CompACT_test","DPM_test","ground_truth_test","RCNN_test"]:
@@ -392,3 +394,116 @@ for j,row in enumerate(means):
 #plt.legend(legend, title = "d")
 plt.xlabel("Required iou for match",fontsize = 20)
 plt.ylabel("Recall",fontsize = 20)
+
+
+
+
+#%% Get metrics for other fast tracking methods
+result_dir = data_paths["tracking_output"]
+
+# parse all .cpkl files into a single dictionary
+# {detector_name:{det_step: results, det_step:results,...},
+#  detector_name:{det_step:results,...},
+#  ...}
+
+all_results = {
+               "none":{},
+               "kf":{},
+               "kf_loc":{}    
+               }
+
+
+for sub_dir in os.listdir(result_dir):
+    if sub_dir in ["none","kf","kf_loc"]:
+        detector = sub_dir
+        sub_dir = os.path.join(result_dir,sub_dir)
+        
+        for file in os.listdir(sub_dir):
+            file = os.path.join(sub_dir,file)
+            print(file)
+            
+            try:
+                with open(file,"rb") as f:
+                    (tracklets,metrics,time_metrics) = pickle.load(f)
+            except:
+                with open(file,"rb") as f:
+                    (tracklets,metrics,time_metrics,_) = pickle.load(f)
+    
+            # get det_step
+            det_step = int(file.split("_")[-1].split(".cpkl")[0])
+            track_id = int(file.split("_")[-2])
+            
+            try:
+                all_results[detector][det_step][track_id] = (tracklets,metrics,time_metrics)
+            except:
+                all_results[detector][det_step] = {track_id:(tracklets,metrics,time_metrics)}
+ with open ("alternate_results.cpkl","wb") as f:
+     pickle.dump(all_results,f)
+     
+#%% Aggregate along all tracks
+agg = {}
+for key in all_results:
+    agg[key] = {}
+    for det_step in all_results[key]:
+        agg[key][det_step] = {}
+        
+        n = 0
+        aggregator = {}
+        for track_id in all_results[key][det_step]:
+            # if track_id in [40712,40774,40773,40772,40711,40771,40792,40775,39361,40901]:
+                n += 1
+                for metric in all_results[key][det_step][track_id][1]:
+                    try:
+                        aggregator[metric] += all_results[key][det_step][track_id][1][metric][0]
+                    except:
+                        aggregator[metric] = all_results[key][det_step][track_id][1][metric][0]
+        for item in aggregator:
+            aggregator[item] = aggregator[item]/n
+        agg[key][det_step] = aggregator
+        
+        # correct ground truth with arbitrary slowdown
+        if key == "ground_truth":
+            agg[key][det_step]["framerate"] = 1.0/(1.0/ agg[key][det_step]['framerate'] + 0.1* 1/det_step)
+        
+        # with open("aggregated_test_results.cpkl","wb") as f:
+        #     pickle.dump(agg,f)
+            
+#%% Generate relative MOTA-Hz plots for all detectors
+ with open("/home/worklab/Documents/code/tracking-by-localization/_eval/aggregated_test_results.cpkl","rb") as f:
+     agg2 = pickle.load(f)
+agg["retinanet"] = agg2["retinanet"]    
+
+plot_dict = {
+               "kf":[],
+               "kf_loc":[],
+               "none":[]
+               }
+
+for detector in agg.keys():
+    det_steps = []
+    detector_hz = []
+    detector_MOTAs = []
+        
+    for det_step in range(50):
+        if det_step == 1:
+            baseline_hz = 1#agg[detector][det_step]["framerate"]
+            baseline_mota = 1# agg[detector][det_step]["mota"]
+        if det_step in agg[detector].keys():
+           det_steps.append(det_step)
+           detector_hz.append(agg[detector][det_step]["framerate"]/baseline_hz)
+           detector_MOTAs.append(agg[detector][det_step]["mota"]/baseline_mota)
+       
+        plot_dict[detector] = (det_steps,detector_hz,detector_MOTAs)
+
+plt.figure()
+legend = []
+for detector in plot_dict.keys():
+    legend.append(detector)
+    a,b,c = plot_dict[detector]
+    plt.plot(b,c,linewidth = 3)
+
+plt.legend(legend,fontsize = 20)
+plt.tick_params(axis='x', labelsize= 16)
+plt.tick_params(axis='y', labelsize= 16)
+plt.xlabel("Relative framerate",fontsize = 20)
+plt.ylabel("Relative accuracy",fontsize = 20)

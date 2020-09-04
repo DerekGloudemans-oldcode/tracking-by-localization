@@ -579,6 +579,7 @@ class Localization_Tracker():
 
         while frame_num != -1:            
             
+            #if frame_num % self.d < self.init_frames:
             # predict next object locations
             start = time.time()
             try: # in the case that there are no active objects will throw exception

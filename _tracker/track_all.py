@@ -52,7 +52,6 @@ def get_track_dict(TRAIN):
         track_dict[id]['labels'] = item
     return track_dict
 
-
 if __name__ == "__main__":
     
      #add argparse block here so we can optinally run from command line
@@ -64,7 +63,7 @@ if __name__ == "__main__":
      except:
          TRAIN = False
      #for det_conf_cutoff in [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
-         for det_step in [1,2,3,4,5,6,7]: 
+         for det_step in [1,3,5,9,15,21,29,35,45]: 
                 
                 #print("Beginning tracking with {}".format(det))
                 # input parameters
@@ -120,7 +119,7 @@ if __name__ == "__main__":
                 localizer.load_state_dict(cp['model_state_dict']) 
                 
                 # no localization update!
-                localizer = None
+                #localizer = None
                 
                 # get detector
                 detector = resnet50(num_classes=13, pretrained=True)
@@ -159,7 +158,7 @@ if __name__ == "__main__":
                                                    det_step = det_step,
                                                    init_frames = init_frames,
                                                    fsld_max = det_step,
-                                                   det_conf_cutoff = 0.2,
+                                                   det_conf_cutoff = 0.5,
                                                    matching_cutoff = matching_cutoff,
                                                    iou_cutoff = iou_cutoff,
                                                    ber = ber,
