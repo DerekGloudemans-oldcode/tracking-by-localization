@@ -2,8 +2,7 @@
 """
 Created on Sat Mar  7 15:45:48 2020
 
-@author: derek
-"""
+@author: d"""
 import os
 import sys,inspect
 import numpy as np
@@ -32,7 +31,7 @@ for item in directories:
     sys.path.insert(0,item)
 
 from _data_utils.detrac.detrac_localization_dataset import Localize_Dataset, class_dict
-from _localizers.detrac_resnet34_localizer import ResNet34_Localizer
+from _localizers.detrac_resnet34_localizer import ResNet34_Tracktor_Localizer as Localizer
 from config.data_paths import data_paths
 
 # surpress XML warnings
@@ -341,10 +340,10 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()   
     
     # 2. load model
-    model = ResNet34_Localizer()
-    cp = "cpu_detrac_resnet34_alpha.pt"
+    model = Localizer()
+    cp = "TRACTOR_INIT.pt"
     cp = torch.load(cp)
-    model.load_state_dict(cp['model_state_dict'])
+    model.load_state_dict(cp)
 
     if MULTI:
         model = nn.DataParallel(model,device_ids = [0,1])

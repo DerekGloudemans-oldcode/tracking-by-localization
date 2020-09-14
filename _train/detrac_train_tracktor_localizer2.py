@@ -32,7 +32,7 @@ for item in directories:
     sys.path.insert(0,item)
 
 from _data_utils.detrac.detrac_localization_dataset import Localize_Dataset, class_dict
-from _localizers.detrac_resnet34_localizer import ResNet34_Localizer
+from _localizers.detrac_resnet34_localizer import ResNet34_Tracktor_Localizer2 as Localizer
 from config.data_paths import data_paths
 
 # surpress XML warnings
@@ -46,12 +46,12 @@ warnings.filterwarnings(action='once')
 
 def train_model(model, optimizer, scheduler,losses,
                     dataloaders,device, patience= 10, start_epoch = 0,
-                    all_metrics = None):
+                    all_metrics = None, width_loss = None):
         """
         Alternates between a training step and a validation step at each epoch. 
         Validation results are reported but don't impact model weights
         """
-        max_epochs = 200
+        max_epochs = 20
         
         # for storing all metrics
         if all_metrics == None:
@@ -78,9 +78,22 @@ def train_model(model, optimizer, scheduler,losses,
                 count = 0
                 total_loss = 0
                 total_acc = 0
-                for inputs, targets,_ in dataloaders[phase]:
+                total_pre_acc = 0
+                for inputs, targets,prevs in dataloaders[phase]:
+                    
+                    imsize = 224
+                    wer = 3
+                    
                     inputs = inputs.to(device)
                     targets = targets.to(device)
+                    prevs = prevs.to(device).float()
+                    reg_prevs = (prevs[:,:4]+imsize*(wer-1)/2)/(imsize*wer)
+                    reg_prevs = reg_prevs.float()
+                    
+                    prev_widths = torch.zeros([reg_prevs.shape[0],2])
+                    prev_widths[:,0] = reg_prevs[:,2] - reg_prevs[:,0] 
+                    prev_widths[:,1] = reg_prevs[:,3] - reg_prevs[:,1]
+                    prev_widths = prev_widths.float().to(device)
                     
                     # zero the parameter gradients
                     optimizer.zero_grad()
@@ -88,63 +101,110 @@ def train_model(model, optimizer, scheduler,losses,
                     # forward
                     # track history if only in train
                     with torch.set_grad_enabled(phase == 'train'):
-                        cls_out,reg_out = model(inputs)
                         
-                        each_loss = []
-                        # apply each reg loss function
-                        # normalize targets
-                        imsize = 224
-                        wer = 3
-                        reg_targets = (targets[:,:4]+imsize*(wer-1)/2)/(imsize*wer)
-                        acc = 0
                         
                         try:
+                            cls_out,reg_out = model(inputs,prev_widths)
+                        
+                            each_loss = []
+                            # apply each reg loss function
+                            # normalize targets
+                            
+                            reg_targets = (targets[:,:4]+imsize*(wer-1)/2)/(imsize*wer)
+                            
+                            reg_targets = reg_targets.float()
+                            #reg_prevs = reg_prevs.float()
+                            reg_out = reg_out.float()
+                            
+                            # compute offset relative to first frame bbox
+                            #reg_out = reg_out + reg_prevs
+                            
                             for loss_fn in losses['reg']:
-                                loss_comp = loss_fn(reg_out.float(),reg_targets.float()) 
+                                loss_comp = loss_fn(reg_out,reg_targets) 
                                 if phase == 'train':
                                     loss_comp.backward(retain_graph = True)
-                                each_loss.append(round(loss_comp.item()*100000)/100000.0)
-                                
+                                each_loss.append(round(loss_comp.item()*10000)/10000.0)
+                            
+                            # # # backprop loss from offset from previous bbox
+                            # offset_loss = losses["reg"][0](reg_out,reg_prevs)/10.0
+                            # if phase == 'train':
+                            #     offset_loss.backward(retain_graph = True)
+                            # each_loss.append(round(offset_loss.item()*10000)/10000.0)
+                              
+                            # backprop width loss here
+                            # loss_comp = width_loss(reg_out,reg_prevs) * 10
+                            # if phase == 'train':
+                            #     loss_comp.backward(retain_graph = True)
+                            # each_loss.append(round(loss_comp.item()*10000)/10000.0)  
+                            
                             # apply each cls loss function
                             cls_targets = targets[:,4]
                             for loss_fn in losses['cls']:
-                                loss_comp = loss_fn(cls_out.float(),cls_targets.long()) /100.0
+                                loss_comp = loss_fn(cls_out.float(),cls_targets.long()) /10.0
                                 if phase == 'train':
                                     loss_comp.backward()
-                                each_loss.append(round(loss_comp.item()*100000)/100000.0)
+                                each_loss.append(round(loss_comp.item()*10000)/10000.0)
                            
                             
                             # backpropogate loss and adjust model weights
                             if phase == 'train':
                                 optimizer.step()
             
+                            # compute IoU accuracy
+                            acc,pre_acc = accuracy(reg_targets,reg_out,reg_prevs)
+                        
+                            count += 1
+                            total_acc += acc
+                            total_pre_acc += pre_acc
+                            total_loss += sum(each_loss)
+                            
+                            del reg_out,reg_prevs,reg_targets,prevs,targets,inputs
+                            
                         except RuntimeError:
                             print("Some sort of autograd error")
                             
-                    # verbose update
-                    count += 1
-                    total_acc += acc
-                    total_loss += sum(each_loss) #loss.item()
+                            for p in model.parameters():
+                                if p.grad is not None:
+                                    del p.grad
+                            del prevs,targets,inputs  
+                            
+                            torch.cuda.empty_cache()
+                            
+                        
                     if count % 10 == 0:
                         print("{} epoch {} batch {} -- Loss so far: {:03f} -- {}".format(phase,epoch,count,total_loss/count,[item for item in each_loss]))
-                   
-                    # if count % 1000 == 0:
-                    #     plot_batch(model,next(iter(dataloaders['train'])),class_dict)
+                        print("Pre-localization acc: {}  Post-localization acc: {}".format(total_pre_acc/count,total_acc/count))
+                    #if count % 1000 == 0:
+                        #plot_batch(model,next(iter(dataloaders['train'])),class_dict)
                     
-                            
+                    
+                    if count % 2000 == 0:
+                        # save a checkpoint
+                        PATH = "detrac_resnet34_tracktor_epoch{}_{}.pt".format(epoch,count)
+                        torch.save({
+                            'epoch': epoch,
+                            'model_state_dict': model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(), 
+                            "metrics": all_metrics
+                            }, PATH)
+                      
+                    if count > 8000:
+                        break
+                    
                 # report and record metrics at end of epoch
                 avg_acc = total_acc/count
                 avg_loss = total_loss/count
                 print("Epoch {} avg {} loss: {:05f}  acc: {}".format(epoch, phase,avg_loss,avg_acc))
                 all_metrics["{}_loss".format(phase)].append(total_loss)
                 all_metrics["{}_acc".format(phase)].append(avg_acc)
+                torch.cuda.empty_cache()
             
             if epoch % 1 == 0:
                 plot_batch(model,next(iter(dataloaders['train'])),class_dict)
 
                 if avg_loss < best_loss:
                     # save a checkpoint
-                    PATH = "detrac_resnet34_epoch{}.pt".format(epoch)
+                    PATH = "detrac_resnet34_tracktor_epoch{}.pt".format(epoch)
                     torch.save({
                         'epoch': epoch,
                         'model_state_dict': model.state_dict(),
@@ -180,6 +240,53 @@ def load_model(checkpoint_file,model,optimizer):
     
     return model,optimizer,epoch,all_metrics
 
+
+def accuracy(target,output,prev):
+    """
+    Computes iou accuracy vs target for both predictions and previous knowledge (input)
+    """
+    epsilon = 1e-06
+    # minx miny maxx maxy
+    minx,_ = torch.max(torch.cat((output[:,0].unsqueeze(1),target[:,0].unsqueeze(1)),1),1)
+    miny,_ = torch.max(torch.cat((output[:,1].unsqueeze(1),target[:,1].unsqueeze(1)),1),1)
+    maxx,_ = torch.min(torch.cat((output[:,2].unsqueeze(1),target[:,2].unsqueeze(1)),1),1)
+    maxy,_ = torch.min(torch.cat((output[:,3].unsqueeze(1),target[:,3].unsqueeze(1)),1),1)
+    
+    zeros = torch.zeros(minx.shape).unsqueeze(1).to(device)
+    delx,_ = torch.max(torch.cat(((maxx-minx).unsqueeze(1),zeros),1),1)
+    dely,_ = torch.max(torch.cat(((maxy-miny).unsqueeze(1),zeros),1),1)
+    intersection = torch.mul(delx,dely)
+    a1 = torch.mul(output[:,2]-output[:,0],output[:,3]-output[:,1])
+    a2 = torch.mul(target[:,2]-target[:,0],target[:,3]-target[:,1])
+    #a1,_ = torch.max(torch.cat((a1.unsqueeze(1),zeros),1),1)
+    #a2,_ = torch.max(torch.cat((a2.unsqueeze(1),zeros),1),1)
+    union = a1 + a2 - intersection 
+    iou = intersection / (union + epsilon)
+    #iou = torch.clamp(iou,0)
+    acc = iou.sum()/(len(iou)+epsilon)
+    
+    
+    # repeat for prev
+    minx,_ = torch.max(torch.cat((prev[:,0].unsqueeze(1),target[:,0].unsqueeze(1)),1),1)
+    miny,_ = torch.max(torch.cat((prev[:,1].unsqueeze(1),target[:,1].unsqueeze(1)),1),1)
+    maxx,_ = torch.min(torch.cat((prev[:,2].unsqueeze(1),target[:,2].unsqueeze(1)),1),1)
+    maxy,_ = torch.min(torch.cat((prev[:,3].unsqueeze(1),target[:,3].unsqueeze(1)),1),1)
+    
+    zeros = torch.zeros(minx.shape).unsqueeze(1).to(device)
+    delx,_ = torch.max(torch.cat(((maxx-minx).unsqueeze(1),zeros),1),1)
+    dely,_ = torch.max(torch.cat(((maxy-miny).unsqueeze(1),zeros),1),1)
+    intersection = torch.mul(delx,dely)
+    a1 = torch.mul(prev[:,2]-prev[:,0],prev[:,3]-prev[:,1])
+    a2 = torch.mul(target[:,2]-target[:,0],target[:,3]-target[:,1])
+    #a1,_ = torch.max(torch.cat((a1.unsqueeze(1),zeros),1),1)
+    #a2,_ = torch.max(torch.cat((a2.unsqueeze(1),zeros),1),1)
+    union = a1 + a2 - intersection 
+    iou = intersection / (union + epsilon)
+    pre_acc = iou.sum() / (len(iou) + epsilon)
+    
+    return acc, pre_acc
+
+
 class Box_Loss(nn.Module):        
     def __init__(self):
         super(Box_Loss,self).__init__()
@@ -207,22 +314,28 @@ class Box_Loss(nn.Module):
         #iou = torch.clamp(iou,0)
         return 1- iou.sum()/(len(iou)+epsilon)
     
-class Width_Loss(nn.Module):        
+class Width_Loss(nn.Module):
     def __init__(self):
         super(Width_Loss,self).__init__()
+    
+    def forward(self,output,prev):
+        """ Compute MSE between output width and previous width"""
         
-    def forward(self,output,target,epsilon = 1e-07):
-        """ Compute the bbox iou loss for target vs output using tensors to preserve
-        gradients for efficient backpropogation"""
+        out_width   = output[:,2] - output[:,0]
+        out_height  = output[:,3] - output[:,1]
+        prev_width  =   prev[:,2] -   prev[:,0]
+        prev_height =   prev[:,3] -   prev[:,1]
         
-        # minx miny maxx maxy
-        pred_width = output[:,2]-output[:,0]
-        targ_width = target[:,2]-target[:,0]
-        error = torch.abs(pred_width - targ_width) / targ_width
-        loss  = error.mean()
-
+        diff_width  = out_width  - prev_width
+        diff_height = out_height - prev_height
+        diff = torch.cat((diff_width,diff_height),dim = 0)
+        square = torch.pow(diff,2)
+        
+        loss = square.sum() / len(square)
+        
         return loss
-  
+    
+        
 def plot_batch(model,batch,class_dict):
     """
     Given a batch and corresponding labels, plots both model predictions
@@ -231,11 +344,24 @@ def plot_batch(model,batch,class_dict):
     batch - batch from loader loading Detrac_Localize_Dataset() data
     class-dict - dict for converting between integer and string class labels
     """
+    wer = 3
+    imsize = 224
+        
     input = batch[0]
     label = batch[1]
+    prev = batch[1]
+    prev = prev.to(device).float()
+    reg_prevs = (prev[:,:4]+imsize*(wer-1)/2)/(imsize*wer)
+    reg_prevs = reg_prevs.float()
+    
+    reg_prevs[:,0] = reg_prevs[:,2] - reg_prevs[:,0]
+    reg_prevs[:,1] = reg_prevs[:,3] - reg_prevs[:,1]
+    reg_prevs = reg_prevs[:,:2]
+    input = input.to(device)
+    
     cls_label = label[:,4]
     reg_label = label[:,:4]
-    cls_output, reg_output = model(input)
+    cls_output, reg_output = model(input,reg_prevs)
     
     _,cls_preds = torch.max(cls_output,1)
     batch = input.data.cpu().numpy()
@@ -264,8 +390,7 @@ def plot_batch(model,batch,class_dict):
         cls_true = cls_label[i].item()
         reg_true = reg_label[i]
         
-        wer = 3
-        imsize = 224
+        
         
         # convert to normalized coords
         reg_true = (reg_true+imsize*(wer-1)/2)/(imsize*wer)
@@ -305,7 +430,7 @@ def move_dual_checkpoint_to_cpu(model,optimizer,checkpoint):
     for key in model.state_dict():
         new_state_dict[key.split("module.")[-1]] = model.state_dict()[key]
     
-    new_checkpoint = checkpoint.split("resnet")[0] + "cpu_resnet18_epoch{}.pt".format(epoch)
+    new_checkpoint = "cpu" + checkpoint 
     
     torch.save({
         'epoch': epoch,
@@ -313,16 +438,56 @@ def move_dual_checkpoint_to_cpu(model,optimizer,checkpoint):
         'optimizer_state_dict': optimizer.state_dict(),
         "metrics": all_metrics
         }, new_checkpoint)
+
+def old_checkpoint(model,cp):
+    cp = torch.load(cp)
+    cp = cp["model_state_dict"]
+    cp["regressor2.0.bias"] = cp["regressor.2.bias"].cpu()     # size 4
+    cp["regressor2.0.weight"] = cp["regressor.2.weight"].cpu() # size 4 x 31
+    del cp["regressor.2.bias"],cp["regressor.2.weight"]
+    
+    # append 4 new values to regressor2.0.weight
+    new = torch.randn([4,4])*0.2 
+    cp["regressor2.0.weight"] = torch.cat((cp["regressor2.0.weight"],new), axis = 1)
+    
+    delete = []
+    for key in cp.keys():
+        if "embedder" in key:
+            delete.append(key)
+    
+    delete.reverse()
+    
+    for key in delete:
+        del cp[key]
+        
+    model.load_state_dict(cp)# = cp
+    
+    return model
+
+def tracktor1_2_convert(model,cp):
+     weighting = 0.2
+     cp = torch.load(cp)
+     cp = cp["model_state_dict"]
+     cp["regressor2.0.weight"] = torch.cat((cp["regressor2.0.weight"], torch.randn([31,35]).to(device)*weighting),axis = 0)
+     cp["regressor2.0.bias"] = torch.cat((cp["regressor2.0.bias"], torch.randn([31]).to(device)*weighting),axis = 0)
+     cp["regressor2.2.weight"] = torch.randn([4,35]).to(device) * weighting
+     cp["regressor2.2.weight"][:4,:4] = torch.eye(4).to(device)
+     cp["regressor2.2.bias"] = torch.randn(4).to(device) * weighting
+     
+     model.load_state_dict(cp)
+     return model
     
 
 #------------------------------ Main code here -------------------------------#
 if __name__ == "__main__":
     
-    checkpoint_file = None
-    
-    patience = 3
+    checkpoint_file = "TRACKTOR2_INIT.pt"
+    checkpoint_file = "detrac_resnet34_tracktor_epoch7_6000.pt"
+    #checkpoint_file = "TRACKTOR_SAVE.pt"#
+    #checkpoint_file = None
+    patience = 1
     lr_init = 0.001
-    
+        
     label_dir       = data_paths["train_lab"]
     train_image_dir = data_paths["train_partition"]
     test_image_dir  = data_paths["val_partition"]
@@ -341,24 +506,19 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()   
     
     # 2. load model
-    model = ResNet34_Localizer()
-    cp = "cpu_detrac_resnet34_alpha.pt"
-    cp = torch.load(cp)
-    model.load_state_dict(cp['model_state_dict'])
-
-    if MULTI:
-        model = nn.DataParallel(model,device_ids = [0,1])
-    model = model.to(device)
-    print("Loaded model.")
+    model = Localizer()
+    # cp = "cpu_detrac_resnet34_alpha.pt"
+    # model = old_checkpoint(model,cp)    
     
+    # model = tracktor1_2_convert(model,checkpoint_file)
+    #checkpoint_file = None
     
     # 3. create training params
-    params = {'batch_size' : 64,
+    params = {'batch_size' : 24,
               'shuffle'    : True,
-              'num_workers':0,
+              'num_workers': 0 ,
               'drop_last'  : True
               }
-    
     # 4. create dataloaders
     try:   
         len(train_data)
@@ -370,37 +530,70 @@ if __name__ == "__main__":
     trainloader = data.DataLoader(train_data, **params)
     testloader = data.DataLoader(test_data, **params)
     
-    # group dataloaders #cp = "detrac_resnet34_alpha.pt"
-    #cp = torch.load(cp)
-    #model.load_state_dict(cp['model_state_dict'])
+    # group dataloaders 
     dataloaders = {"train":trainloader, "val": testloader}
     datasizes = {"train": len(train_data), "val": len(test_data)}
     print("Got dataloaders. {},{}".format(datasizes['train'],datasizes['val']))
     
     # 5. define stochastic gradient descent optimizer    
-    #optimizer = optim.Adam(model.parameters(), lr=lr_init)
-    optimizer = optim.SGD(model.parameters(), lr = lr_init, momentum = 0.3)
-    # 6. decay LR by a factor of 0.1 every 7 epochs
-    exp_lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, verbose = True, mode = "min", patience = patience, factor=0.3)
+    #optimizer = optim.SGD(model.parameters(), lr = lr_init, momentum = 0.3)
     
-    # 7. define start epoch for consistent labeling if checkpoint is reloaded
+    #freeze all but last layer
+    # for param in model.parameters():
+    #     param.requires_grad = False
+    # for param in model.regressor2.parameters():
+    #     param.requires_grad = True
+    # for param in model.classifier.parameters():
+    #     param.requires_grad = True
+      
+    
+    optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr = lr_init, momentum = 0.9)    
+    
+    # 7. define start epoch for consistent labeling if checkpoint is 
+    exp_lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, verbose = True, mode = "min", patience = patience, factor=0.3)
     start_epoch = -1
     all_metrics = None
+
+
+    if MULTI:
+        model = nn.DataParallel(model,device_ids = [0,1])
+        model = model.to(device)
+        print("Loaded model.")  
+
 
     # 8. if checkpoint specified, load model and optimizer weights from checkpoint
     if checkpoint_file != None:
         model,_,start_epoch,all_metrics = load_model(checkpoint_file, model, optimizer)
         #model,_,start_epoch = load_model(checkpoint_file, model, optimizer) # optimizer restarts from scratch
         print("Checkpoint loaded.")
-     
+
+        
     # 9. define losses
     losses = {"cls": [nn.CrossEntropyLoss()],
-              "reg": [Width_Loss(), Box_Loss(),]
+              "reg": [nn.MSELoss(),Box_Loss(),]
               }
-    # losses = {"cls": [],
-    #             "reg": [nn.MSELoss,Box_Loss()]
-    #             }
     
+    # losses = {"cls": [],
+    #           "reg": [Box_Loss()]
+    #           }
+    
+    #optimizer = optim.Adam(model.parameters(), lr=lr_init)
+
+    for param in model.parameters():
+        param.requires_grad = True
+    optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr = lr_init, momentum = 0.3)    
+
+    #freeze all but last layer
+    # for param in model.parameters():
+    #     param.requires_grad = False
+    # for param in model.module.regressor2.parameters():
+    #     param.requires_grad = True
+    # for param in model.module.classifier.parameters():
+    #     param.requires_grad = True
+      
+    
+    # optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr = lr_init, momentum = 0.9)    
+
     if True:    
     # train model
         print("Beginning training.")
@@ -412,6 +605,7 @@ if __name__ == "__main__":
                             device,
                             patience = patience*2,
                             start_epoch = start_epoch+1,
-                            all_metrics = all_metrics)
+                            all_metrics = all_metrics,
+                            width_loss = Width_Loss())
         
    

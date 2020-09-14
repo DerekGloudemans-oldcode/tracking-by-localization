@@ -28,10 +28,6 @@ from loc_tracker import Localization_Tracker
 from _eval import mot_eval as mot
 from _detectors.mock_detector import Mock_Detector
 
-from _localizers.detrac_resnet34_localizer import ResNet34_Tracktor_Localizer
-from loc_tracker_2 import Localization_Tracker
-
-
 def get_track_dict(TRAIN):
     # get list of all files in directory and corresponding path to track and labels
     if TRAIN:
@@ -80,7 +76,6 @@ if __name__ == "__main__":
                 matching_cutoff = 100
                 SHOW = False
                 loc_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
-                loc_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_TRACKTOR_SAVE_3.pt"
                 det_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/detrac_retinanet_4-1.pt"
                 det_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/detrac_retinanet_epoch7.pt"
                 class_dict = {
@@ -115,14 +110,11 @@ if __name__ == "__main__":
                 
                 # get filter
                 filter_state_path = os.path.join(data_paths["filter_params"],"detrac_7_QRR.cpkl")
-                filter_state_path = os.path.join(data_paths["filter_params"],"tracktor_detrac_7_QRR.cpkl")
-
                 with open(filter_state_path ,"rb") as f:
                          kf_params = pickle.load(f)
                 
                 # get localizer
-                #localizer = ResNet34_Localizer()
-                localizer = ResNet34_Tracktor_Localizer()
+                localizer = ResNet34_Localizer()
                 cp = torch.load(loc_cp)
                 localizer.load_state_dict(cp['model_state_dict']) 
                 

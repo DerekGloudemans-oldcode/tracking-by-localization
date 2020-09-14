@@ -56,11 +56,11 @@ class Localize_Dataset(data.Dataset):
                     transforms.ColorJitter(brightness = 0.3,contrast = 0.3,saturation = 0.2)
                         ]),
                 transforms.ToTensor(),
-                transforms.RandomErasing(p=0.2, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
-                transforms.RandomErasing(p=0.2, scale=(0.02, 0.07), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
-                transforms.RandomErasing(p=0.2, scale=(0.02, 0.05), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
-                transforms.RandomErasing(p=0.1, scale=(0.02, 0.15), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
-                transforms.RandomErasing(p=0.2, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
+                # transforms.RandomErasing(p=0.2, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
+                # transforms.RandomErasing(p=0.2, scale=(0.02, 0.07), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
+                # transforms.RandomErasing(p=0.2, scale=(0.02, 0.05), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
+                # transforms.RandomErasing(p=0.1, scale=(0.02, 0.15), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
+                # transforms.RandomErasing(p=0.2, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=(0.485,0.456,0.406)),
 
                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
@@ -83,7 +83,6 @@ class Localize_Dataset(data.Dataset):
             labels,metadata = label_list[track_list[i].split("/")[-1]]
             
             # each iteration of the loop gets one image
-            print (len(images),len(labels))
             for j in range(len(images)):
                 try:
                     image = images[j]
@@ -92,7 +91,23 @@ class Localize_Dataset(data.Dataset):
                     # each iteration gets one label (one detection)
                     for k in range(len(label)):
                         detection = label[k]
-                        self.all_data.append((image,detection))
+                        id = detection["id"]
+                        if j > 0:
+                            try:
+                                prev_label = labels[j-1]
+                                match = False
+                                for kk in range(len(prev_label)):
+                                    prev_obj = prev_label[kk]
+                                    if prev_obj["id"] == id:
+                                        prev_detection = prev_obj
+                                        match = True
+                                        break
+                                if not match:
+                                    prev_detection = None
+                            except:
+                                prev_detection = None
+                        
+                        self.all_data.append((image,detection,prev_detection))
 
                 except:
                     # this occurs because Detrac was dumbly labeled and they didn't include empty annotations for frames without objects
@@ -122,19 +137,35 @@ class Localize_Dataset(data.Dataset):
         cur = self.all_data[index]
         im = Image.open(cur[0])
         label = cur[1]
+        prev_label = cur[2]
+        
         
         # crop image so that only relevant portion is showing for one object
         # copy so that original coordinates aren't overwritten
         bbox = label["bbox"].copy()
         
+        # If no previous label, simply take ground truth and distort it by a bit
+        if prev_label is None:
+            pbox = bbox
+        else:
+            
+            pbox = prev_label["bbox"].copy()
+            
+        # add noise to previous bbox
+        width_noise = np.random.rand(2)*4-2
+        x_noise = np.random.rand(2)*15-7.5     
+        pbox[0] = pbox[0] + x_noise[0] + width_noise[0] /2.0 
+        pbox[1] = pbox[1] + x_noise[1] + width_noise[1] /2.0 
+        pbox[2] = pbox[2] + x_noise[0] - width_noise[0] /2.0 
+        pbox[3] = pbox[3] + x_noise[1] - width_noise[1] /2.0 
         
-                
         # flip sometimes
         if np.random.rand() > 0.5:
             im= F.hflip(im)
             # reverse coords and also switch xmin and xmax
             bbox[[2,0]] = im.size[0] - bbox[[0,2]]
-        
+            pbox[[2,0]] = im.size[0] - pbox[[0,2]]
+            
         # randomly shift the center of the crop
         shift_scale = 150
         x_shift = np.random.normal(0,im.size[0]/shift_scale)
@@ -155,7 +186,13 @@ class Localize_Dataset(data.Dataset):
         maxx = maxx + x_shift
         miny = miny + y_shift
         maxy = maxy + y_shift
-    
+        
+        # try to deal with crops that are too small
+        if maxy-miny < 2: 
+            maxy = miny + 30
+        if maxx-minx < 2:
+            maxx = minx + 30
+            
         im_crop = F.crop(im,miny,minx,maxy-miny,maxx-minx)
         del im 
         
@@ -167,6 +204,11 @@ class Localize_Dataset(data.Dataset):
         bbox[1] = bbox[1] - miny
         bbox[2] = bbox[2] - minx
         bbox[3] = bbox[3] - miny
+        
+        pbox[0] = pbox[0] - minx
+        pbox[1] = pbox[1] - miny
+        pbox[2] = pbox[2] - minx
+        pbox[3] = pbox[3] - miny
          
         orig_size = im_crop.size
         im_crop = F.resize(im_crop, (224,224))
@@ -176,18 +218,22 @@ class Localize_Dataset(data.Dataset):
         bbox[1] = bbox[1] * 224/orig_size[1]
         bbox[3] = bbox[3] * 224/orig_size[1]
         
+        pbox[0] = pbox[0] * 224/orig_size[0]
+        pbox[2] = pbox[2] * 224/orig_size[0]
+        pbox[1] = pbox[1] * 224/orig_size[1]
+        pbox[3] = pbox[3] * 224/orig_size[1]
+        
         # apply random affine transformation
         y = np.zeros(5)
         y[0:4] = bbox
         y[4] = label["class_num"]
-        
-        im_crop,y = self.random_affine_crop(im_crop,y)
+        #im_crop,y = self.random_affine_crop(im_crop,y)
 
         
         
         # convert image and label to tensors
         im_t = self.im_tf(im_crop)
-        return im_t, y
+        return im_t, y,pbox
     
     
     
@@ -399,7 +445,7 @@ class Localize_Dataset(data.Dataset):
         mean = np.array([0.485, 0.456, 0.406])
         stddev = np.array([0.229, 0.224, 0.225])
         
-        im,label = self[index]
+        im,label,prev = self[index]
         
         im = self.denorm(im)
         cv_im = np.array(im) 
@@ -414,7 +460,8 @@ class Localize_Dataset(data.Dataset):
 
         #cv_im = plot_bboxes_2d(cv_im,label,metadata['ignored_regions'])
         cv2.rectangle(cv_im,(int(label[0]),int(label[1])),(int(label[2]),int(label[3])),(255,0,0),2)    
-    
+        cv2.rectangle(cv_im,(int(prev[0]),int(prev[1])),(int(prev[2]),int(prev[3])),(0,0,255),1)  
+        
         cv2.imshow("Class: {}".format(label[4]),cv_im)
         cv2.waitKey(0) 
         cv2.destroyAllWindows()

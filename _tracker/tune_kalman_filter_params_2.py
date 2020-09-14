@@ -41,7 +41,7 @@ from _data_utils.detrac.detrac_detection_dataset import Detection_Dataset,collat
 
 # filter and CNNs
 from _tracker.torch_kf_dual import Torch_KF
-from _localizers.detrac_resnet34_localizer import ResNet34_Localizer
+from _localizers.detrac_resnet34_localizer import ResNet34_Tracktor_Localizer
 from _detectors.pytorch_retinanet.retinanet.model import resnet50 
 
 
@@ -296,13 +296,24 @@ def fit_localizer_R(loader,
         
         for iteration in range(n_iterations):
             batch,ims = next(iter(loader))
-            frame_idx = 0
+            frame_idx = 1
             gt = batch[:,frame_idx,:4]
+            prev = batch[:,frame_idx-1,:4]
+            
+            
+            
+            prevs = torch.zeros(prev.shape)
+            prevs[:,0] = prev[:,0] - prev[:,2]/2.0
+            prevs[:,2] = prev[:,0] + prev[:,2]/2.0
+            prevs[:,1] = prev[:,1] - prev[:,2]*prev[:,3]/2.0
+            prevs[:,3] = prev[:,1] + prev[:,2]*prev[:,3]/2.0
+            
             
             # get starting error
             degradation = np.array([2,2,4,0.01]) *skew_ratio # should roughly equal localizer error covariance
             skew = np.random.normal(0,degradation,(len(batch),4))
             gt_skew = gt + skew
+            
             skewed_iou.append(iou(gt_skew,gt))
             
             # ims are collated by frame,then batch index
@@ -322,37 +333,6 @@ def fit_localizer_R(loader,
                        #    new_frame = torch.zeros([3,375,1242])
                        #    new_frame[:,:,:frame.shape[2]] = frame
                        #    frame = new_frame   
-                       
-                       MASK = False
-                       if MASK:
-                           
-                           other_objs = dataset.frame_objs[item]                          
-                           # create copy of frame
-                           frame_copy = frame.clone()                           
-                           # mask each other object in frame
-                           for obj in other_objs:
-                               xmin = (obj[0] - obj[2] / 2.0).astype(int)
-                               ymin = (obj[1] - obj[2]*obj[3] / 2.0).astype(int)
-                               xmax = (obj[0] + obj[2] / 2.0).astype(int)
-                               ymax = (obj[1] + obj[2]*obj[3] / 2.0).astype(int)       
-                               
-                               region = obj
-                               shape = frame[:,ymin:ymax,xmin:xmax].shape
-                               r =  torch.normal(0.485,0.229,[shape[1],shape[2]])
-                               g =  torch.normal(0.456,0.224,[shape[1],shape[2]])
-                               b =  torch.normal(0.406,0.225,[shape[1],shape[2]])
-                               rgb = torch.stack([r,g,b])
-                               frame[:,ymin:ymax,xmin:xmax] = rgb
-                               
-                           # restore gt_skew pixels
-                           o = gt_skew[idx]
-                           xmin = (o[0] - o[2] / 2.0).int()
-                           ymin = (o[1] - o[2]*obj[3] / 2.0).int()
-                           xmax = (o[0] + o[2] / 2.0).int()
-                           ymax = (o[1] + o[2]*obj[3] / 2.0).int()
-                           frame[:,ymin:ymax,xmin:xmax] = frame_copy[:,ymin:ymax,xmin:xmax]
-                           #plt.imshow(frame.transpose(2,0).transpose(0,1))
-                           #plt.pause(5)
                            
                        frames.append(frame)
             frames = torch.stack(frames).to(device)
@@ -383,7 +363,19 @@ def fit_localizer_R(loader,
             # crop using roi align
             crops = roi_align(frames,torch_boxes,(224,224))
             
-            _,reg_out = localizer(crops)
+            # we need to convert the prevs into this coordinate space. First, shift, then scale to by 224/box_scales, convert to xysr and finally apply wer
+            new_prevs = torch.zeros(prevs.shape)
+            new_prevs[:,0] = prevs[:,0] - new_boxes[:,1]
+            new_prevs[:,1] = prevs[:,1] - new_boxes[:,2]
+            new_prevs[:,2] = prevs[:,2] - new_boxes[:,1]
+            new_prevs[:,3] = prevs[:,3] - new_boxes[:,2]
+            new_prevs = new_prevs * 224/torch.from_numpy(box_scales).unsqueeze(1).repeat(1,4)   
+            
+            wer = 3
+            scaled_prevs = (new_prevs + 224*(wer-1)/2.0)/(224*wer) 
+            scaled_prevs = scaled_prevs.to(device).float()
+            
+            _,reg_out = localizer(crops,scaled_prevs)
             torch.cuda.synchronize()
     
             # 5b. convert to global image coordinates 
@@ -391,11 +383,15 @@ def fit_localizer_R(loader,
             # these detections are relative to crops - convert to global image coords
             wer = 3 # window expansion ratio, was set during training
             
+            #reg_out = -scaled_prevs + reg_out
+            #reg_out = scaled_prevs
+            
             detections = (reg_out* 224*wer - 224*(wer-1)/2)
             detections = detections.data.cpu()
             
+            #detections = detections + new_prevs * 224/box_scales.unsqueeze(0)
             # plot outputs
-            if True and iteration % 100 == 0:
+            if False and iteration % 100 == 0:
                 batch_size = 32
                 row_size = 8
                 fig, axs = plt.subplots((batch_size+row_size-1)//row_size, row_size, constrained_layout=True)
@@ -448,6 +444,9 @@ def fit_localizer_R(loader,
             detections[:,2] = detections[:,2]*box_scales/224 + new_boxes[:,1]
             detections[:,1] = detections[:,1]*box_scales/224 + new_boxes[:,2]
             detections[:,3] = detections[:,3]*box_scales/224 + new_boxes[:,2]
+    
+            # detections is now an offset from previous detections, so add previous detections
+            #detections = detections + prevs
     
             # convert into xysr form 
             output = np.zeros([len(detections),4])
@@ -674,6 +673,19 @@ def filter_rollouts(loader,
              tracker.predict()
              objs = tracker.objs()
              objs = [objs[key] for key in objs]
+             
+             #prev = batch[:,frame_idx-1,:4]
+             prev = tracker.X[:,:4]
+             # prevs = objs
+             # prevs = [torch.from_numpy(item)[:4] for item in prevs]
+             # prev = torch.stack(prevs)
+             
+             prevs = torch.zeros(prev.shape)
+             prevs[:,0] = prev[:,0] - prev[:,2]/2.0
+             prevs[:,2] = prev[:,0] + prev[:,2]/2.0
+             prevs[:,1] = prev[:,1] - prev[:,2]*prev[:,3]/2.0
+             prevs[:,3] = prev[:,1] + prev[:,2]*prev[:,3]/2.0
+             
              a_priori = torch.from_numpy(np.array(objs)).double()
              a_priori_iou[frame_idx].append(iou(a_priori,gt))
          
@@ -748,7 +760,6 @@ def filter_rollouts(loader,
              box_scales = np.min(np.stack((boxes[:,2],boxes[:,2]*boxes[:,3]),axis = 1),axis = 1) #/2.0
                  
              #expand box slightly
-             ber = 2.15
              box_scales = box_scales * ber# box expansion ratio
              
              new_boxes[:,1] = boxes[:,0] - box_scales/2
@@ -763,7 +774,20 @@ def filter_rollouts(loader,
              # crop using roi align
              crops = roi_align(frames,torch_boxes,(224,224))
              
-             _,reg_out = localizer(crops)
+             
+             new_prevs = torch.zeros(prevs.shape)
+             new_prevs[:,0] = prevs[:,0] - new_boxes[:,1]
+             new_prevs[:,1] = prevs[:,1] - new_boxes[:,2]
+             new_prevs[:,2] = prevs[:,2] - new_boxes[:,1]
+             new_prevs[:,3] = prevs[:,3] - new_boxes[:,2]
+             new_prevs = new_prevs * 224/torch.from_numpy(box_scales).unsqueeze(1).repeat(1,4)   
+                
+             wer = 3
+             scaled_prevs = (new_prevs + 224*(wer-1)/2.0)/(224*wer) 
+             scaled_prevs = scaled_prevs.to(device).float()
+             
+             
+             _,reg_out = localizer(crops,scaled_prevs)
              torch.cuda.synchronize()
      
              # 5b. convert to global image coordinates 
@@ -866,24 +890,24 @@ if __name__ == "__main__":
     # get paths to filter parameter save_files
     filter_directory = data_paths['filter_params']
     INIT = os.path.join(filter_directory,"init_7.cpkl")
-    QFIT = os.path.join(filter_directory,"detrac_7_Q.cpkl")
-    QRFIT = os.path.join(filter_directory,"detrac_7_QR_redwidth.cpkl")
-    QRRFIT = os.path.join(filter_directory, "detrac_7_QRR.cpkl")
-    QRFIT_RED = os.path.join(filter_directory, "detrac_7_QR_red.cpkl")
+    QFIT = os.path.join(filter_directory,"tracktor_detrac_7_Q.cpkl")
+    QRFIT = os.path.join(filter_directory,"tracktor_detrac_7_QR.cpkl")
+    QRRFIT = os.path.join(filter_directory, "tracktor_detrac_7_QRR.cpkl")
+    #QRFIT_RED = os.path.join(filter_directory, "tracktor_detrac_7_QR_red.cpkl")
     
    
 
     #%% fit model error covariance
-    with open(INIT,"rb") as f:
-        kf_params = pickle.load(f)
+    # with open(INIT,"rb") as f:
+    #     kf_params = pickle.load(f)
     
     
-    fit_Q(loader,
-          kf_params,
-          n_iterations = 20000,
-          save_file = QFIT,
-          speed_init = "smooth",
-          state_size = 7)    
+    # fit_Q(loader,
+    #       kf_params,
+    #       n_iterations = 20000,
+    #       save_file = QFIT,
+    #       speed_init = "smooth",
+    #       state_size = 7)    
     
     
      #%% fit measurment error covariance
@@ -894,9 +918,8 @@ if __name__ == "__main__":
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
-    localizer = ResNet34_Localizer()
-    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
-    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_beta_width.pt"
+    localizer = ResNet34_Tracktor_Localizer()
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_TRACKTOR_SAVE_3.pt"
 
     cp = torch.load(resnet_checkpoint)
     localizer.load_state_dict(cp['model_state_dict']) 
@@ -907,37 +930,37 @@ if __name__ == "__main__":
                     kf_params, 
                     device, 
                     localizer,
-                    bers = [2.0],
+                    bers = [2],
                     save_file = QRFIT,
-                    n_iterations = 50)
+                    n_iterations = 500)
         
     
     #%%        Rollouts
-    with open(QRFIT,"rb") as f:
-        kf_params = pickle.load(f)
-        kf_params["R"] = kf_params["R"] / 50
-        #kf_params["R"] = kf_params["R"] * torch.tensor([[0.1,0.05,0.05,0.05],[0.05,0.1,0.05,0.05],[0.05,0.05,0.05,0.05],[0.05,0.05,0.05,0.05]])
-
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda:0" if use_cuda else "cpu")
-
-    localizer = ResNet34_Localizer()
-    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
-    resnet_checkpoint   = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_beta_width.pt"
-    cp = torch.load(resnet_checkpoint)
-    localizer.load_state_dict(cp['model_state_dict']) 
-    localizer = localizer.to(device)
-    localizer.eval()
+    for divisor in [35]:
+        with open(QRFIT,"rb") as f:
+            kf_params = pickle.load(f)
+            kf_params["R"] = kf_params["R"] / divisor
+            # kf_params["R"] = kf_params["R"] * torch.tensor([[0.1,0.05,0.05,0.05],[0.05,0.1,0.05,0.05],[0.05,0.05,0.05,0.05],[0.05,0.05,0.05,0.05]])
     
-    filter_rollouts(loader,
-                    kf_params,
-                    localizer,
-                    device,
-                    n_iterations = 5,
-                    ber = 2.0,
-                    skew_ratio = 0,
-                    PLOT = False)
-
+        use_cuda = torch.cuda.is_available()
+        device = torch.device("cuda:0" if use_cuda else "cpu")
+    
+        localizer = ResNet34_Tracktor_Localizer()
+        resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_TRACKTOR_SAVE_3.pt"
+        cp = torch.load(resnet_checkpoint)
+        localizer.load_state_dict(cp['model_state_dict']) 
+        localizer = localizer.to(device)
+        localizer.eval()
+        
+        filter_rollouts(loader,
+                        kf_params,
+                        localizer,
+                        device,
+                        n_iterations = 50,
+                        ber = 2.0,
+                        skew_ratio = 0,
+                        PLOT = False)
+        print("with Divisor = {}".format(divisor))
 
     #%% Fit R2 for detector
     with open(QRFIT,"rb") as f:
@@ -947,7 +970,7 @@ if __name__ == "__main__":
     device = torch.device("cuda:0" if use_cuda else "cpu")
     
     # Create the model
-    checkpoint_file = "detrac_retinanet_4-1.pt"
+    checkpoint_file = "/home/worklab/Documents/code/tracking-by-localization/_train/detrac_retinanet_4-1.pt"
     #checkpoint_file = "detrac_retinanet_epoch7.pt"
     retinanet = resnet50(num_classes=13, pretrained=True)
     retinanet.load_state_dict(torch.load(checkpoint_file).state_dict())
