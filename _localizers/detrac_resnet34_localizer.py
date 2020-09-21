@@ -26,7 +26,8 @@ class ResNet34_Localizer(nn.Module):
         
         # remove last layers of vgg19 model, save first fc layer and maxpool layer
         #self.feat = models.resnet18(pretrained=True)
-        self.feat = models.resnet34(pretrained = True)
+        #self.feat = models.resnet34(pretrained = True)
+        self.feat = models.resnet50(pretrained = True)
         # get size of some layers
         start_num = self.feat.fc.out_features
         mid_num = int(np.sqrt(start_num))
@@ -171,7 +172,7 @@ class ResNet34_Tracktor_Localizer(nn.Module):
         
         return cls_out,reg_out
     
-class ResNet34_Tracktor_Localizer2(nn.Module):
+class ResNet34_Conf_Localizer(nn.Module):
     
     """
     Defines a new network structure with vgg19 feature extraction and two parallel 
@@ -183,7 +184,7 @@ class ResNet34_Tracktor_Localizer2(nn.Module):
         In the constructor we instantiate some nn.Linear modules and assign them as
         member variables.
         """
-        super(ResNet34_Tracktor_Localizer2, self).__init__()
+        super(ResNet34_Conf_Localizer, self).__init__()
         
         # remove last layers of vgg19 model, save first fc layer and maxpool layer
         #self.feat = models.resnet18(pretrained=True)
@@ -193,7 +194,7 @@ class ResNet34_Tracktor_Localizer2(nn.Module):
         mid_num = int(np.sqrt(start_num))
         
         cls_out_num = 13
-        reg_out_num = 4 # bounding box coords
+        reg_out_num = 4 # bounding box coords + conf
         embed_out_num = 128
         
         # define classifier
@@ -206,13 +207,11 @@ class ResNet34_Tracktor_Localizer2(nn.Module):
         
         # define regressor
         self.regressor = nn.Sequential(
-                          nn.Linear(start_num,mid_num,bias=True),
-                          nn.ReLU())
-        self.regressor2 = nn.Sequential(
-                          #nn.Dropout(0.1),
-                          nn.Linear(mid_num+2,reg_out_num,bias = True),
-                          nn.ReLU()
-                          )
+                         nn.Linear(start_num,mid_num,bias=True),
+                         nn.ReLU(),
+                         nn.Linear(mid_num,reg_out_num+1,bias = True),
+                         nn.ReLU()
+                         )
         
         # self.embedder = nn.Sequential(
         #           nn.Linear(start_num,start_num // 3,bias=True),
@@ -237,7 +236,7 @@ class ResNet34_Tracktor_Localizer2(nn.Module):
         #         nn.init.uniform_(layer.weight.data,-init_val,init_val)
         #         nn.init.uniform_(layer.bias.data,-init_val,init_val)
             
-    def forward(self, x,prev_x):
+    def forward(self, x):
         """
         In the forward function we accept a Tensor of input data and we must return
         a Tensor of output data. We can use Modules defined in the constructor as
@@ -245,12 +244,9 @@ class ResNet34_Tracktor_Localizer2(nn.Module):
         """
         features = self.feat(x)
         cls_out = self.classifier(features)
-        inter_in = self.regressor(features)
-        inter_out = torch.cat((inter_in,prev_x),dim = 1)
-        reg_out = self.regressor2(inter_out)
+        reg_out = self.regressor(features)
         
         #embed_out = self.embedder(features)
         #out = torch.cat((cls_out, reg_out), 0) # might be the wrong dimension
         
         return cls_out,reg_out
-

@@ -51,15 +51,18 @@ all_results = {
                "CompACT":{},
                "RCNN":{},
                "retinanet":{},
+               "retinanet_wer":{},
                "DPM":{},
-               "ground_truth":{}
+               "ground_truth":{},
+               "kf":{},
+               "none":{},
+               "skip1":{}
                }
 
-all_results = ""
 
 
 for sub_dir in os.listdir(result_dir):
-    if sub_dir in ["retinanet_test","ACF_test","CompACT_test","DPM_test","ground_truth_test","RCNN_test"]:
+    if sub_dir in ["retinanet_test","ACF_test","CompACT_test","DPM_test","ground_truth_test","RCNN_test","retinanet_wer_test","kf_test","none_test","skip1_test"]:
         detector = sub_dir.split("_test")[0]
         sub_dir = os.path.join(result_dir,sub_dir)
         
@@ -109,19 +112,20 @@ for key in all_results:
         if key == "ground_truth":
             agg[key][det_step]["framerate"] = 1.0/(1.0/ agg[key][det_step]['framerate'] + 0.1* 1/det_step)
         
-        # with open("aggregated_test_results.cpkl","wb") as f:
-        #     pickle.dump(agg,f)
+with open("aggregated_test_results_new.cpkl","wb") as f:
+    pickle.dump(agg,f)
             
 #%% Generate MOTA-Hz plots for all detectors
-plt.style.use('ggplot')
-with open("/home/worklab/Documents/code/tracking-by-localization/_eval/aggregated_test_results.cpkl","rb") as f:
-    agg = pickle.load(f)
+# plt.style.use('ggplot')
+# with open("/home/worklab/Documents/code/tracking-by-localization/_eval/aggregated_test_results_new.cpkl","rb") as f:
+#     agg = pickle.load(f)
     
 plot_dict = {
                "ACF":[],
                "CompACT":[],
                "RCNN":[],
                "retinanet":[],
+               "retinanet_wer":[],
                "DPM":[],
                "ground_truth":[]
                }
@@ -437,7 +441,7 @@ for sub_dir in os.listdir(result_dir):
                 all_results[detector][det_step][track_id] = (tracklets,metrics,time_metrics)
             except:
                 all_results[detector][det_step] = {track_id:(tracklets,metrics,time_metrics)}
- with open ("alternate_results.cpkl","wb") as f:
+with open ("alternate_results.cpkl","wb") as f:
      pickle.dump(all_results,f)
      
 #%% Aggregate along all tracks
@@ -474,8 +478,8 @@ for key in all_results:
 agg["retinanet"] = agg2["retinanet"]    
 
 plot_dict = {
-               "kf":[],
-               "kf_loc":[],
+               "kf_only":[],
+               "no_kf":[],
                "none":[]
                }
 

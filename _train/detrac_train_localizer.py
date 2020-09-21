@@ -94,7 +94,7 @@ def train_model(model, optimizer, scheduler,losses,
                         # apply each reg loss function
                         # normalize targets
                         imsize = 224
-                        wer = 3
+                        wer = 1.25
                         reg_targets = (targets[:,:4]+imsize*(wer-1)/2)/(imsize*wer)
                         acc = 0
                         
@@ -125,11 +125,11 @@ def train_model(model, optimizer, scheduler,losses,
                     count += 1
                     total_acc += acc
                     total_loss += sum(each_loss) #loss.item()
-                    if count % 10 == 0:
+                    if count % 200 == 0:
                         print("{} epoch {} batch {} -- Loss so far: {:03f} -- {}".format(phase,epoch,count,total_loss/count,[item for item in each_loss]))
                    
-                    # if count % 1000 == 0:
-                    #     plot_batch(model,next(iter(dataloaders['train'])),class_dict)
+                    if count % 1000 == 0:
+                         plot_batch(model,next(iter(dataloaders['train'])),class_dict)
                     
                             
                 # report and record metrics at end of epoch
@@ -144,8 +144,9 @@ def train_model(model, optimizer, scheduler,losses,
 
                 if avg_loss < best_loss:
                     # save a checkpoint
-                    PATH = "detrac_resnet34_epoch{}.pt".format(epoch)
+                    PATH = "detrac_resnet34_conf_epoch_{}.pt".format(epoch)
                     torch.save({
+                        
                         'epoch': epoch,
                         'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
@@ -231,6 +232,10 @@ def plot_batch(model,batch,class_dict):
     batch - batch from loader loading Detrac_Localize_Dataset() data
     class-dict - dict for converting between integer and string class labels
     """
+    # prevent exploding figure count
+    if len(plt.get_fignums()) > 3:
+        plt.close("all")
+    
     input = batch[0]
     label = batch[1]
     cls_label = label[:,4]
@@ -264,7 +269,7 @@ def plot_batch(model,batch,class_dict):
         cls_true = cls_label[i].item()
         reg_true = reg_label[i]
         
-        wer = 3
+        wer = 1.25
         imsize = 224
         
         # convert to normalized coords
@@ -318,7 +323,7 @@ def move_dual_checkpoint_to_cpu(model,optimizer,checkpoint):
 #------------------------------ Main code here -------------------------------#
 if __name__ == "__main__":
     
-    checkpoint_file = None
+    checkpoint_file = None#"detrac_resnet34_wer125_epoch6.pt"
     
     patience = 3
     lr_init = 0.001
@@ -342,9 +347,9 @@ if __name__ == "__main__":
     
     # 2. load model
     model = ResNet34_Localizer()
-    cp = "cpu_detrac_resnet34_alpha.pt"
-    cp = torch.load(cp)
-    model.load_state_dict(cp['model_state_dict'])
+    # cp = "cpu_detrac_resnet34_alpha.pt"
+    # cp = torch.load(cp)
+    # model.load_state_dict(cp['model_state_dict'])
 
     if MULTI:
         model = nn.DataParallel(model,device_ids = [0,1])
@@ -353,7 +358,7 @@ if __name__ == "__main__":
     
     
     # 3. create training params
-    params = {'batch_size' : 64,
+    params = {'batch_size' : 32,
               'shuffle'    : True,
               'num_workers':0,
               'drop_last'  : True
@@ -378,10 +383,10 @@ if __name__ == "__main__":
     print("Got dataloaders. {},{}".format(datasizes['train'],datasizes['val']))
     
     # 5. define stochastic gradient descent optimizer    
-    #optimizer = optim.Adam(model.parameters(), lr=lr_init)
-    optimizer = optim.SGD(model.parameters(), lr = lr_init, momentum = 0.3)
+    optimizer = optim.Adam(model.parameters(), lr=lr_init)
+    #optimizer = optim.SGD(model.parameters(), lr = lr_init, momentum = 0.3)
     # 6. decay LR by a factor of 0.1 every 7 epochs
-    exp_lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, verbose = True, mode = "min", patience = patience, factor=0.3)
+    exp_lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, verbose = True, mode = "min", patience = 1, factor=0.3)
     
     # 7. define start epoch for consistent labeling if checkpoint is reloaded
     start_epoch = -1
@@ -410,7 +415,7 @@ if __name__ == "__main__":
                             losses,
                             dataloaders,
                             device,
-                            patience = patience*2,
+                            patience = patience,
                             start_epoch = start_epoch+1,
                             all_metrics = all_metrics)
         

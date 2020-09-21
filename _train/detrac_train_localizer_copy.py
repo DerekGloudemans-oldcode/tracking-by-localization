@@ -2,7 +2,8 @@
 """
 Created on Sat Mar  7 15:45:48 2020
 
-@author: d"""
+@author: derek
+"""
 import os
 import sys,inspect
 import numpy as np
@@ -31,7 +32,7 @@ for item in directories:
     sys.path.insert(0,item)
 
 from _data_utils.detrac.detrac_localization_dataset import Localize_Dataset, class_dict
-from _localizers.detrac_resnet34_localizer import ResNet34_Tracktor_Localizer as Localizer
+from _localizers.detrac_resnet34_localizer import ResNet34_Conf_Localizer
 from config.data_paths import data_paths
 
 # surpress XML warnings
@@ -77,6 +78,7 @@ def train_model(model, optimizer, scheduler,losses,
                 count = 0
                 total_loss = 0
                 total_acc = 0
+                running_loss = []
                 for inputs, targets,_ in dataloaders[phase]:
                     inputs = inputs.to(device)
                     targets = targets.to(device)
@@ -93,7 +95,7 @@ def train_model(model, optimizer, scheduler,losses,
                         # apply each reg loss function
                         # normalize targets
                         imsize = 224
-                        wer = 3
+                        wer = 1.25
                         reg_targets = (targets[:,:4]+imsize*(wer-1)/2)/(imsize*wer)
                         acc = 0
                         
@@ -123,12 +125,17 @@ def train_model(model, optimizer, scheduler,losses,
                     # verbose update
                     count += 1
                     total_acc += acc
-                    total_loss += sum(each_loss) #loss.item()
-                    if count % 10 == 0:
-                        print("{} epoch {} batch {} -- Loss so far: {:03f} -- {}".format(phase,epoch,count,total_loss/count,[item for item in each_loss]))
+                    total_loss += sum(each_loss)
+                    
+                    running_loss.append(sum(each_loss))
+                    if len(running_loss) > 200:
+                        running_loss = running_loss[1:]
+                        
+                    if count % 20 == 0:
+                        print("{} epoch {} batch {} -- Running loss: {:03f} -- {}".format(phase,epoch,count,sum(running_loss)/len(running_loss),[item for item in each_loss]))
                    
-                    # if count % 1000 == 0:
-                    #     plot_batch(model,next(iter(dataloaders['train'])),class_dict)
+                    if count % 1000 == 0:
+                         plot_batch(model,next(iter(dataloaders['train'])),class_dict)
                     
                             
                 # report and record metrics at end of epoch
@@ -143,8 +150,9 @@ def train_model(model, optimizer, scheduler,losses,
 
                 if avg_loss < best_loss:
                     # save a checkpoint
-                    PATH = "detrac_resnet34_epoch{}.pt".format(epoch)
+                    PATH = "detrac_resnet34_conf_epoch_{}.pt".format(epoch)
                     torch.save({
+                        
                         'epoch': epoch,
                         'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
@@ -221,6 +229,36 @@ class Width_Loss(nn.Module):
         loss  = error.mean()
 
         return loss
+    
+    
+class Conf_Loss(nn.Module):
+    def __init__(self):
+        super(Conf_Loss,self).__init__()
+    
+    def forward(self,output,target,epsilon = 1e-07):
+        # minx miny maxx maxy
+        minx,_ = torch.max(torch.cat((output[:,0].unsqueeze(1),target[:,0].unsqueeze(1)),1),1)
+        miny,_ = torch.max(torch.cat((output[:,1].unsqueeze(1),target[:,1].unsqueeze(1)),1),1)
+        maxx,_ = torch.min(torch.cat((output[:,2].unsqueeze(1),target[:,2].unsqueeze(1)),1),1)
+        maxy,_ = torch.min(torch.cat((output[:,3].unsqueeze(1),target[:,3].unsqueeze(1)),1),1)
+        
+        zeros = torch.zeros(minx.shape).unsqueeze(1).to(device)
+        delx,_ = torch.max(torch.cat(((maxx-minx).unsqueeze(1),zeros),1),1)
+        dely,_ = torch.max(torch.cat(((maxy-miny).unsqueeze(1),zeros),1),1)
+        intersection = torch.mul(delx,dely)
+        a1 = torch.mul(output[:,2]-output[:,0],output[:,3]-output[:,1])
+        a2 = torch.mul(target[:,2]-target[:,0],target[:,3]-target[:,1])
+        #a1,_ = torch.max(torch.cat((a1.unsqueeze(1),zeros),1),1)
+        #a2,_ = torch.max(torch.cat((a2.unsqueeze(1),zeros),1),1)
+        union = a1 + a2 - intersection 
+        iou = intersection / (union + epsilon)
+       
+        # compare predicted iou to actual iou
+        pred_diff = iou - output[:,4]
+        error = torch.pow(pred_diff,2)
+        
+        return error.mean() 
+        
   
 def plot_batch(model,batch,class_dict):
     """
@@ -230,6 +268,10 @@ def plot_batch(model,batch,class_dict):
     batch - batch from loader loading Detrac_Localize_Dataset() data
     class-dict - dict for converting between integer and string class labels
     """
+    # prevent exploding figure count
+    if len(plt.get_fignums()) > 3:
+        plt.close("all")
+    
     input = batch[0]
     label = batch[1]
     cls_label = label[:,4]
@@ -263,7 +305,7 @@ def plot_batch(model,batch,class_dict):
         cls_true = cls_label[i].item()
         reg_true = reg_label[i]
         
-        wer = 3
+        wer = 1.25
         imsize = 224
         
         # convert to normalized coords
@@ -281,7 +323,7 @@ def plot_batch(model,batch,class_dict):
         im = im.get()
                 
         # title with class preds and gt
-        label = "{} -> ({})".format(class_dict[cls_pred],class_dict[cls_true])
+        label = "Pred {}%   {} -> ({})".format(reg_output[i,4],class_dict[cls_pred],class_dict[cls_true])
         if batch_size <= 8:
             axs[i].imshow(im)
             axs[i].set_title(label)
@@ -317,10 +359,11 @@ def move_dual_checkpoint_to_cpu(model,optimizer,checkpoint):
 #------------------------------ Main code here -------------------------------#
 if __name__ == "__main__":
     
-    checkpoint_file = None
-    
+    checkpoint_file = "detrac_resnet34_wer125_epoch6.pt"
+    checkpoint_file = "CONF_INIT.pt"
+
     patience = 3
-    lr_init = 0.001
+    lr_init = 0.00001
     
     label_dir       = data_paths["train_lab"]
     train_image_dir = data_paths["train_partition"]
@@ -340,10 +383,10 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()   
     
     # 2. load model
-    model = Localizer()
-    cp = "TRACTOR_INIT.pt"
-    cp = torch.load(cp)
-    model.load_state_dict(cp)
+    model = ResNet34_Conf_Localizer()
+    # cp = "cpu_detrac_resnet34_alpha.pt"
+    # cp = torch.load(cp)
+    # model.load_state_dict(cp['model_state_dict'])
 
     if MULTI:
         model = nn.DataParallel(model,device_ids = [0,1])
@@ -352,7 +395,7 @@ if __name__ == "__main__":
     
     
     # 3. create training params
-    params = {'batch_size' : 64,
+    params = {'batch_size' : 32,
               'shuffle'    : True,
               'num_workers':0,
               'drop_last'  : True
@@ -377,10 +420,10 @@ if __name__ == "__main__":
     print("Got dataloaders. {},{}".format(datasizes['train'],datasizes['val']))
     
     # 5. define stochastic gradient descent optimizer    
-    #optimizer = optim.Adam(model.parameters(), lr=lr_init)
-    optimizer = optim.SGD(model.parameters(), lr = lr_init, momentum = 0.3)
+    optimizer = optim.Adam(model.parameters(), lr=lr_init)
+    #optimizer = optim.SGD(model.parameters(), lr = lr_init, momentum = 0.3)
     # 6. decay LR by a factor of 0.1 every 7 epochs
-    exp_lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, verbose = True, mode = "min", patience = patience, factor=0.3)
+    exp_lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, verbose = True, mode = "min", patience = 1, factor=0.3)
     
     # 7. define start epoch for consistent labeling if checkpoint is reloaded
     start_epoch = -1
@@ -388,13 +431,16 @@ if __name__ == "__main__":
 
     # 8. if checkpoint specified, load model and optimizer weights from checkpoint
     if checkpoint_file != None:
-        model,_,start_epoch,all_metrics = load_model(checkpoint_file, model, optimizer)
-        #model,_,start_epoch = load_model(checkpoint_file, model, optimizer) # optimizer restarts from scratch
-        print("Checkpoint loaded.")
-     
+        # model,_,start_epoch,all_metrics = load_model(checkpoint_file, model, optimizer)
+        # #model,_,start_epoch = load_model(checkpoint_file, model, optimizer) # optimizer restarts from scratch
+        # print("Checkpoint loaded.")
+        cp = torch.load(checkpoint_file)
+        cp['model_state_dict']["module.regressor.2.weight"][4,:] = torch.randn(31) * 0.2
+        model.load_state_dict(cp['model_state_dict'])
+        
     # 9. define losses
     losses = {"cls": [nn.CrossEntropyLoss()],
-              "reg": [Width_Loss(), Box_Loss(),]
+              "reg": [Box_Loss(), Conf_Loss()]
               }
     # losses = {"cls": [],
     #             "reg": [nn.MSELoss,Box_Loss()]
@@ -409,7 +455,7 @@ if __name__ == "__main__":
                             losses,
                             dataloaders,
                             device,
-                            patience = patience*2,
+                            patience = patience,
                             start_epoch = start_epoch+1,
                             all_metrics = all_metrics)
         

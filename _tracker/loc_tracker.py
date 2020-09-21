@@ -53,7 +53,8 @@ class Localization_Tracker():
                  iou_cutoff = 0.5,
                  det_conf_cutoff = 0.5,
                  ber = 2.0,
-                 PLOT = True):
+                 PLOT = True,
+                 wer = 1.25):
         """
          Parameters
         ----------
@@ -90,7 +91,7 @@ class Localization_Tracker():
         self.det_conf_cutoff = det_conf_cutoff
         self.ber = ber
         self.PLOT = PLOT
-     
+        self.wer = wer
         # CUDA
         use_cuda = torch.cuda.is_available()
         self.device = torch.device("cuda:0" if use_cuda else "cpu")
@@ -274,7 +275,7 @@ class Localization_Tracker():
             # get predictions
             bbox = bboxes[i].data.cpu().numpy()
             
-            wer = 3
+            wer = self.wer
             imsize = 224
             
             # transform bbox coords back into im pixel coords
@@ -295,7 +296,7 @@ class Localization_Tracker():
           
             
     def local_to_global(self,reg_out,box_ids,box_scales,new_boxes,wer = 3):
-        wer = 3 # window expansion ratio, was set during training
+        wer = self.wer # window expansion ratio, was set during training
         
         detections = (reg_out* 224*wer - 224*(wer-1)/2)
         detections = detections.data.cpu()
@@ -637,7 +638,7 @@ class Localization_Tracker():
                 self.manage_tracks(detections,matchings,pre_ids)
                 
             # skip  if there are no active tracklets or no localizer (KF prediction with no update)    
-            elif len(pre_locations) > 0 and self.localizer is not None:
+            elif len(pre_locations) > 0 and self.localizer is not None and (frame_num % self.d)%2 == 0:
                 
                 # get crop for each active tracklet
                 crops,new_boxes,box_ids,box_scales = self.crop_tracklets(pre_locations,frame)

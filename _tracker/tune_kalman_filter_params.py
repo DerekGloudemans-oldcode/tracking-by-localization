@@ -280,7 +280,8 @@ def fit_localizer_R(loader,
                     n_iterations = 500,
                     bers = [1.5],
                     skew_ratio = 1, 
-                    save_file = "temp.cpkl"):
+                    save_file = "temp.cpkl",
+                    wer = 1.25):
     
     # save best across all ber values
     best_covariance = None
@@ -389,7 +390,6 @@ def fit_localizer_R(loader,
             # 5b. convert to global image coordinates 
                 
             # these detections are relative to crops - convert to global image coords
-            wer = 3 # window expansion ratio, was set during training
             
             detections = (reg_out* 224*wer - 224*(wer-1)/2)
             detections = detections.data.cpu()
@@ -412,7 +412,6 @@ def fit_localizer_R(loader,
                     bbox = detections[i]
                     
                     
-                    wer = 3
                     imsize = 224
                     
                     # convert xysr to xyxy
@@ -602,7 +601,8 @@ def filter_rollouts(loader,
                     skew_ratio = 0,
                     PLOT = True,
                     speed_init = "smooth",
-                    state_size = 7
+                    state_size = 7,
+                    wer = 1.25
                     ):
     
      skewed_iou = []        # how far off each skewed measurement is during init
@@ -769,7 +769,6 @@ def filter_rollouts(loader,
              # 5b. convert to global image coordinates 
                  
              # these detections are relative to crops - convert to global image coords
-             wer = 3 # window expansion ratio, was set during training
              
              detections = (reg_out* 224*wer - 224*(wer-1)/2)
              detections = detections.data.cpu()
@@ -867,8 +866,8 @@ if __name__ == "__main__":
     filter_directory = data_paths['filter_params']
     INIT = os.path.join(filter_directory,"init_7.cpkl")
     QFIT = os.path.join(filter_directory,"detrac_7_Q.cpkl")
-    QRFIT = os.path.join(filter_directory,"detrac_7_QR_redwidth.cpkl")
-    QRRFIT = os.path.join(filter_directory, "detrac_7_QRR.cpkl")
+    QRFIT = os.path.join(filter_directory,"detrac_7_QR_wer.cpkl")
+    QRRFIT = os.path.join(filter_directory, "detrac_7_QRR_wer.cpkl")
     QRFIT_RED = os.path.join(filter_directory, "detrac_7_QR_red.cpkl")
     
    
@@ -896,7 +895,7 @@ if __name__ == "__main__":
 
     localizer = ResNet34_Localizer()
     resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
-    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_beta_width.pt"
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_wer125_epoch_6.pt"
 
     cp = torch.load(resnet_checkpoint)
     localizer.load_state_dict(cp['model_state_dict']) 
@@ -909,13 +908,14 @@ if __name__ == "__main__":
                     localizer,
                     bers = [2.0],
                     save_file = QRFIT,
-                    n_iterations = 50)
+                    n_iterations = 500,
+                    wer = 1.25)
         
     
     #%%        Rollouts
-    with open(QRFIT,"rb") as f:
+    with open(QRRFIT,"rb") as f:
         kf_params = pickle.load(f)
-        kf_params["R"] = kf_params["R"] / 50
+        #kf_params["R"] = kf_params["R"] / 50
         #kf_params["R"] = kf_params["R"] * torch.tensor([[0.1,0.05,0.05,0.05],[0.05,0.1,0.05,0.05],[0.05,0.05,0.05,0.05],[0.05,0.05,0.05,0.05]])
 
     use_cuda = torch.cuda.is_available()
@@ -924,6 +924,8 @@ if __name__ == "__main__":
     localizer = ResNet34_Localizer()
     resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
     resnet_checkpoint   = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_beta_width.pt"
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_wer125_epoch_6.pt"
+
     cp = torch.load(resnet_checkpoint)
     localizer.load_state_dict(cp['model_state_dict']) 
     localizer = localizer.to(device)
@@ -933,10 +935,11 @@ if __name__ == "__main__":
                     kf_params,
                     localizer,
                     device,
-                    n_iterations = 5,
+                    n_iterations = 50,
                     ber = 2.0,
                     skew_ratio = 0,
-                    PLOT = False)
+                    PLOT = False,
+                    wer = 1.25)
 
 
     #%% Fit R2 for detector
@@ -948,10 +951,17 @@ if __name__ == "__main__":
     
     # Create the model
     checkpoint_file = "detrac_retinanet_4-1.pt"
-    #checkpoint_file = "detrac_retinanet_epoch7.pt"
     retinanet = resnet50(num_classes=13, pretrained=True)
     retinanet.load_state_dict(torch.load(checkpoint_file).state_dict())
-    #retinanet.load_state_dict(torch.load(checkpoint_file)["model_state_dict"])
+    
+    checkpoint_file = "detrac_retinanet_epoch7.pt"
+    temp = torch.load(checkpoint_file)["model_state_dict"]
+    new = {}
+    for key in temp:
+        new_key = key.split("module.")[-1]
+        new[new_key] = temp[key]
+    retinanet.load_state_dict(new)
+    
     retinanet = retinanet.to(device)
     retinanet.eval()
     
