@@ -282,6 +282,9 @@ def fit_localizer_R(loader,
                     skew_ratio = 1, 
                     save_file = "temp.cpkl"):
     
+    with open ("/home/worklab/Documents/code/tracking-by-localization/config/filter_params/apriori_noise.cpkl","rb") as f:
+            noise_params = pickle.load(f)
+    
     # save best across all ber values
     best_covariance = None
     best_mean = None
@@ -298,9 +301,12 @@ def fit_localizer_R(loader,
             batch,ims = next(iter(loader))
             frame_idx = 1
             gt = batch[:,frame_idx,:4]
-            prev = batch[:,frame_idx-1,:4]
+            prev = batch[:,frame_idx,:4]
             
-            
+            mean = noise_params["mean"]
+            covariance = noise_params["covariance"] *0.25
+            noise = np.random.multivariate_normal(mean, covariance)
+            prev = prev + noise 
             
             prevs = torch.zeros(prev.shape)
             prevs[:,0] = prev[:,0] - prev[:,2]/2.0
@@ -891,8 +897,11 @@ if __name__ == "__main__":
     filter_directory = data_paths['filter_params']
     INIT = os.path.join(filter_directory,"init_7.cpkl")
     QFIT = os.path.join(filter_directory,"tracktor_detrac_7_Q.cpkl")
-    QRFIT = os.path.join(filter_directory,"tracktor_detrac_7_QR.cpkl")
-    QRRFIT = os.path.join(filter_directory, "tracktor_detrac_7_QRR.cpkl")
+    QRFIT = os.path.join(filter_directory,"2tracktor_detrac_7_QR.cpkl")
+    QRRFIT = os.path.join(filter_directory, "2tracktor_detrac_7_QRR.cpkl")
+    
+    QRRFIT = os.path.join(filter_directory, "detrac_7_QRR_wer.cpkl")
+    QRFIT  = os.path.join(filter_directory, "a_priori_QRR.cpkl")
     #QRFIT_RED = os.path.join(filter_directory, "tracktor_detrac_7_QR_red.cpkl")
     
    
@@ -912,14 +921,14 @@ if __name__ == "__main__":
     
      #%% fit measurment error covariance
     
-    with open(QFIT,"rb") as f:
+    with open(QRRFIT,"rb") as f:
         kf_params = pickle.load(f)
         
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
     localizer = ResNet34_Tracktor_Localizer()
-    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_TRACKTOR_SAVE_3.pt"
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_apriori_tracktor_5.pt"
 
     cp = torch.load(resnet_checkpoint)
     localizer.load_state_dict(cp['model_state_dict']) 
@@ -936,7 +945,7 @@ if __name__ == "__main__":
         
     
     #%%        Rollouts
-    for divisor in [35]:
+    for divisor in [25,30,35,40,45,50]:
         with open(QRFIT,"rb") as f:
             kf_params = pickle.load(f)
             kf_params["R"] = kf_params["R"] / divisor
@@ -947,6 +956,8 @@ if __name__ == "__main__":
     
         localizer = ResNet34_Tracktor_Localizer()
         resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_TRACKTOR_SAVE_3.pt"
+        resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_apriori_tracktor_5.pt"
+
         cp = torch.load(resnet_checkpoint)
         localizer.load_state_dict(cp['model_state_dict']) 
         localizer = localizer.to(device)

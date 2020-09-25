@@ -22,9 +22,9 @@ from config.data_paths import directories, data_paths
 for item in directories:
     sys.path.insert(0,item)
 
-from _localizers.detrac_resnet34_localizer import ResNet34_Localizer
+from _localizers.detrac_resnet34_localizer import ResNet34_Tracktor_Localizer
 from _detectors.pytorch_retinanet.retinanet.model import resnet50
-from loc_tracker import Localization_Tracker
+from loc_tracker_2 import Localization_Tracker
 from _eval import mot_eval as mot
 from _detectors.mock_detector import Mock_Detector
 
@@ -63,7 +63,7 @@ if __name__ == "__main__":
      except:
          TRAIN = False
      #for det_conf_cutoff in [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
-         for det_step in [9]: 
+         for det_step in [9,1,3,5,15,21,29,35,45]: 
                 
                 #print("Beginning tracking with {}".format(det))
                 # input parameters
@@ -76,6 +76,8 @@ if __name__ == "__main__":
                 matching_cutoff = 100
                 SHOW = False
                 loc_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
+                loc_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_apriori_tracktor_5.pt"
+
                 det_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/detrac_retinanet_4-1.pt"
                 det_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/detrac_retinanet_epoch7.pt"
                 class_dict = {
@@ -109,12 +111,13 @@ if __name__ == "__main__":
                     }
                 
                 # get filter
-                filter_state_path = os.path.join(data_paths["filter_params"],"detrac_7_QRR.cpkl")
+                filter_state_path = os.path.join(data_paths["filter_params"],"a_priori_QRR.cpkl")
                 with open(filter_state_path ,"rb") as f:
                          kf_params = pickle.load(f)
+                         kf_params["R"]  = kf_params["R"] /35.0
                 
                 # get localizer
-                localizer = ResNet34_Localizer()
+                localizer = ResNet34_Tracktor_Localizer()
                 cp = torch.load(loc_cp)
                 localizer.load_state_dict(cp['model_state_dict']) 
                 

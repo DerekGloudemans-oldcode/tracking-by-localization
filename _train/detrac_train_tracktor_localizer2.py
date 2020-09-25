@@ -32,7 +32,7 @@ for item in directories:
     sys.path.insert(0,item)
 
 from _data_utils.detrac.detrac_localization_dataset import Localize_Dataset, class_dict
-from _localizers.detrac_resnet34_localizer import ResNet34_Tracktor_Localizer2 as Localizer
+from _localizers.detrac_resnet34_localizer import ResNet34_Tracktor_Localizer as Localizer
 from config.data_paths import data_paths
 
 # surpress XML warnings

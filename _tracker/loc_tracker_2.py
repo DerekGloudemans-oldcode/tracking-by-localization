@@ -90,7 +90,7 @@ class Localization_Tracker():
         self.det_conf_cutoff = det_conf_cutoff
         self.ber = ber
         self.PLOT = PLOT
-     
+        self.wer = 3
         # CUDA
         use_cuda = torch.cuda.is_available()
         self.device = torch.device("cuda:0" if use_cuda else "cpu")
@@ -257,7 +257,7 @@ class Localization_Tracker():
         new_prevs[:,3] = prevs[:,3] - new_boxes[:,2]
         new_prevs = new_prevs * 224/torch.from_numpy(box_scales).unsqueeze(1).repeat(1,4)   
         
-        wer = 3
+        wer = self.wer
         scaled_prevs = (new_prevs + 224*(wer-1)/2.0)/(224*wer) 
         scaled_prevs = scaled_prevs.to(self.device).float()
         
@@ -294,7 +294,7 @@ class Localization_Tracker():
             # get predictions
             bbox = bboxes[i].data.cpu().numpy()
             
-            wer = 3
+            wer = self.wer
             imsize = 224
             
             # transform bbox coords back into im pixel coords
@@ -314,8 +314,8 @@ class Localization_Tracker():
             plt.pause(.001)    
           
             
-    def local_to_global(self,reg_out,box_ids,box_scales,new_boxes,wer = 3):
-        wer = 3 # window expansion ratio, was set during training
+    def local_to_global(self,reg_out,box_ids,box_scales,new_boxes):
+        wer = self.wer # window expansion ratio, was set during training
         
         detections = (reg_out* 224*wer - 224*(wer-1)/2)
         detections = detections.data.cpu()
@@ -686,7 +686,7 @@ class Localization_Tracker():
                     self.all_classes[box_ids[i]][cls_preds[i].item()] += 1
                 
                 # convert to global image coordinates 
-                detections = self.local_to_global(reg_out,box_ids,box_scales,new_boxes,wer = 3)    
+                detections = self.local_to_global(reg_out,box_ids,box_scales,new_boxes)    
                 self.time_metrics['post_localize'] += time.time() - start
     
                 # update tracker

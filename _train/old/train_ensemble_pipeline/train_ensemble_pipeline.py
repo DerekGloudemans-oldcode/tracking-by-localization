@@ -1,57 +1,79 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Wed Apr 29 11:20:41 2020
+Created on Sat Mar  7 15:45:48 2020
 
-@author: worklab
+@author: derek
 """
-
-import torch
+import os
+import sys,inspect
 import numpy as np
-import random
+import random 
+import math
+import time
 import _pickle as pickle
-import matplotlib.pyplot as plt
-import cv2 
-import os,sys,inspect
+random.seed = 0
 
-
-#from detrac_files.detrac_tracking_dataset import Track_Dataset
-
-from torch.utils.data import DataLoader
-
-
-
+import cv2
 from PIL import Image
+import torch
+from torch import nn, optim
+from torch.utils import data
+from torchvision import transforms,models
 from torchvision.transforms import functional as F
-from torchvision.ops import roi_align
+import matplotlib.pyplot  as plt
+
 
 
 # add all packages and directories to path
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe()))))
 sys.path.insert(0,parent_dir)
 
-from config.data_paths import directories, data_paths
+from config.data_paths import directories
 for item in directories:
     sys.path.insert(0,item)
 
-# data
+from torch.utils.data import DataLoader
+    
 from _data_utils.detrac.detrac_tracking_dataset import Track_Dataset
-from _data_utils.detrac.detrac_localization_dataset import Localize_Dataset
-from _data_utils.detrac.detrac_detection_dataset import Detection_Dataset,collate
-
-# filter and CNNs
-from _tracker.torch_kf_dual import Torch_KF
-from _localizers.detrac_resnet34_localizer import ResNet34_Localizer,ResNet34_Conf_Localizer
+from _data_utils.detrac.detrac_localization_dataset import Localize_Dataset, class_dict
+from _localizers.detrac_resnet34_localizer import ResNet34_Conf_Localizer
+from config.data_paths import data_paths
 from _detectors.pytorch_retinanet.retinanet.model import resnet50 
 
 
+# surpress XML warnings
+import warnings
+warnings.filterwarnings(action='once')
 
 
-plt.style.use("seaborn")
-random.seed  = 0
+class Box_Loss(nn.Module):        
+    def __init__(self):
+        super(Box_Loss,self).__init__()
+        
+    def forward(self,output,target,epsilon = 1e-07):
+        """ Compute the bbox iou loss for target vs output using tensors to preserve
+        gradients for efficient backpropogation"""
+        
+        # minx miny maxx maxy
+        minx,_ = torch.max(torch.cat((output[:,0].unsqueeze(1),target[:,0].unsqueeze(1)),1),1)
+        miny,_ = torch.max(torch.cat((output[:,1].unsqueeze(1),target[:,1].unsqueeze(1)),1),1)
+        maxx,_ = torch.min(torch.cat((output[:,2].unsqueeze(1),target[:,2].unsqueeze(1)),1),1)
+        maxy,_ = torch.min(torch.cat((output[:,3].unsqueeze(1),target[:,3].unsqueeze(1)),1),1)
+        
+        zeros = torch.zeros(minx.shape).unsqueeze(1).to(device)
+        delx,_ = torch.max(torch.cat(((maxx-minx).unsqueeze(1),zeros),1),1)
+        dely,_ = torch.max(torch.cat(((maxy-miny).unsqueeze(1),zeros),1),1)
+        intersection = torch.mul(delx,dely)
+        a1 = torch.mul(output[:,2]-output[:,0],output[:,3]-output[:,1])
+        a2 = torch.mul(target[:,2]-target[:,0],target[:,3]-target[:,1])
+        #a1,_ = torch.max(torch.cat((a1.unsqueeze(1),zeros),1),1)
+        #a2,_ = torch.max(torch.cat((a2.unsqueeze(1),zeros),1),1)
+        union = a1 + a2 - intersection 
+        iou = intersection / (union + epsilon)
+        #iou = torch.clamp(iou,0)
+        return 1- iou.sum()/(len(iou)+epsilon)
 
 
-       
 def test_outputs(bboxes,crops):
     """
     Description
@@ -280,8 +302,7 @@ def fit_localizer_R(loader,
                     n_iterations = 500,
                     bers = [1.5],
                     skew_ratio = 1, 
-                    save_file = "temp.cpkl",
-                    wer = 1.25):
+                    save_file = "temp.cpkl"):
     
     # save best across all ber values
     best_covariance = None
@@ -297,13 +318,24 @@ def fit_localizer_R(loader,
         
         for iteration in range(n_iterations):
             batch,ims = next(iter(loader))
-            frame_idx = 0
+            frame_idx = 1
             gt = batch[:,frame_idx,:4]
+            prev = batch[:,frame_idx-1,:4]
+            
+            
+            
+            prevs = torch.zeros(prev.shape)
+            prevs[:,0] = prev[:,0] - prev[:,2]/2.0
+            prevs[:,2] = prev[:,0] + prev[:,2]/2.0
+            prevs[:,1] = prev[:,1] - prev[:,2]*prev[:,3]/2.0
+            prevs[:,3] = prev[:,1] + prev[:,2]*prev[:,3]/2.0
+            
             
             # get starting error
             degradation = np.array([2,2,4,0.01]) *skew_ratio # should roughly equal localizer error covariance
             skew = np.random.normal(0,degradation,(len(batch),4))
             gt_skew = gt + skew
+            
             skewed_iou.append(iou(gt_skew,gt))
             
             # ims are collated by frame,then batch index
@@ -323,37 +355,6 @@ def fit_localizer_R(loader,
                        #    new_frame = torch.zeros([3,375,1242])
                        #    new_frame[:,:,:frame.shape[2]] = frame
                        #    frame = new_frame   
-                       
-                       MASK = False
-                       if MASK:
-                           
-                           other_objs = dataset.frame_objs[item]                          
-                           # create copy of frame
-                           frame_copy = frame.clone()                           
-                           # mask each other object in frame
-                           for obj in other_objs:
-                               xmin = (obj[0] - obj[2] / 2.0).astype(int)
-                               ymin = (obj[1] - obj[2]*obj[3] / 2.0).astype(int)
-                               xmax = (obj[0] + obj[2] / 2.0).astype(int)
-                               ymax = (obj[1] + obj[2]*obj[3] / 2.0).astype(int)       
-                               
-                               region = obj
-                               shape = frame[:,ymin:ymax,xmin:xmax].shape
-                               r =  torch.normal(0.485,0.229,[shape[1],shape[2]])
-                               g =  torch.normal(0.456,0.224,[shape[1],shape[2]])
-                               b =  torch.normal(0.406,0.225,[shape[1],shape[2]])
-                               rgb = torch.stack([r,g,b])
-                               frame[:,ymin:ymax,xmin:xmax] = rgb
-                               
-                           # restore gt_skew pixels
-                           o = gt_skew[idx]
-                           xmin = (o[0] - o[2] / 2.0).int()
-                           ymin = (o[1] - o[2]*obj[3] / 2.0).int()
-                           xmax = (o[0] + o[2] / 2.0).int()
-                           ymax = (o[1] + o[2]*obj[3] / 2.0).int()
-                           frame[:,ymin:ymax,xmin:xmax] = frame_copy[:,ymin:ymax,xmin:xmax]
-                           #plt.imshow(frame.transpose(2,0).transpose(0,1))
-                           #plt.pause(5)
                            
                        frames.append(frame)
             frames = torch.stack(frames).to(device)
@@ -384,18 +385,35 @@ def fit_localizer_R(loader,
             # crop using roi align
             crops = roi_align(frames,torch_boxes,(224,224))
             
-            _,reg_out = localizer(crops)
+            # we need to convert the prevs into this coordinate space. First, shift, then scale to by 224/box_scales, convert to xysr and finally apply wer
+            new_prevs = torch.zeros(prevs.shape)
+            new_prevs[:,0] = prevs[:,0] - new_boxes[:,1]
+            new_prevs[:,1] = prevs[:,1] - new_boxes[:,2]
+            new_prevs[:,2] = prevs[:,2] - new_boxes[:,1]
+            new_prevs[:,3] = prevs[:,3] - new_boxes[:,2]
+            new_prevs = new_prevs * 224/torch.from_numpy(box_scales).unsqueeze(1).repeat(1,4)   
+            
+            wer = 3
+            scaled_prevs = (new_prevs + 224*(wer-1)/2.0)/(224*wer) 
+            scaled_prevs = scaled_prevs.to(device).float()
+            
+            _,reg_out = localizer(crops,scaled_prevs)
             torch.cuda.synchronize()
     
             # 5b. convert to global image coordinates 
                 
             # these detections are relative to crops - convert to global image coords
+            wer = 3 # window expansion ratio, was set during training
+            
+            #reg_out = -scaled_prevs + reg_out
+            #reg_out = scaled_prevs
             
             detections = (reg_out* 224*wer - 224*(wer-1)/2)
             detections = detections.data.cpu()
             
+            #detections = detections + new_prevs * 224/box_scales.unsqueeze(0)
             # plot outputs
-            if True and iteration % 100 == 0:
+            if False and iteration % 100 == 0:
                 batch_size = 32
                 row_size = 8
                 fig, axs = plt.subplots((batch_size+row_size-1)//row_size, row_size, constrained_layout=True)
@@ -412,6 +430,7 @@ def fit_localizer_R(loader,
                     bbox = detections[i]
                     
                     
+                    wer = 3
                     imsize = 224
                     
                     # convert xysr to xyxy
@@ -447,6 +466,9 @@ def fit_localizer_R(loader,
             detections[:,2] = detections[:,2]*box_scales/224 + new_boxes[:,1]
             detections[:,1] = detections[:,1]*box_scales/224 + new_boxes[:,2]
             detections[:,3] = detections[:,3]*box_scales/224 + new_boxes[:,2]
+    
+            # detections is now an offset from previous detections, so add previous detections
+            #detections = detections + prevs
     
             # convert into xysr form 
             output = np.zeros([len(detections),4])
@@ -601,10 +623,9 @@ def filter_rollouts(loader,
                     skew_ratio = 0,
                     PLOT = True,
                     speed_init = "smooth",
-                    state_size = 7,
-                    wer = 1.25
+                    state_size = 7
                     ):
-     ap_errors = []
+    
      skewed_iou = []        # how far off each skewed measurement is during init
      starting_iou = []     # after initialization, how far off are we
      a_priori_iou = {}      # after prediction step, how far off is the state
@@ -626,7 +647,7 @@ def filter_rollouts(loader,
          batch,ims = next(iter(loader))
          
          # initialize tracker
-         tracker = Torch_KF("cpu",INIT = kf_params, ADD_MEAN_Q = True, ADD_MEAN_R = True)
+         tracker = Torch_KF("cpu",INIT = kf_params, ADD_MEAN_Q = True, ADD_MEAN_R = False)
      
          obj_ids = [i for i in range(len(batch))]
          
@@ -674,13 +695,22 @@ def filter_rollouts(loader,
              tracker.predict()
              objs = tracker.objs()
              objs = [objs[key] for key in objs]
+             
+             #prev = batch[:,frame_idx-1,:4]
+             prev = tracker.X[:,:4]
+             # prevs = objs
+             # prevs = [torch.from_numpy(item)[:4] for item in prevs]
+             # prev = torch.stack(prevs)
+             
+             prevs = torch.zeros(prev.shape)
+             prevs[:,0] = prev[:,0] - prev[:,2]/2.0
+             prevs[:,2] = prev[:,0] + prev[:,2]/2.0
+             prevs[:,1] = prev[:,1] - prev[:,2]*prev[:,3]/2.0
+             prevs[:,3] = prev[:,1] + prev[:,2]*prev[:,3]/2.0
+             
              a_priori = torch.from_numpy(np.array(objs)).double()
              a_priori_iou[frame_idx].append(iou(a_priori,gt))
          
-             if frame_idx in [1,2,3,4]:
-                 ap_error = a_priori[:,:4] - gt[:,:4]
-                 ap_errors.append(ap_error)
-            
              ap_states.append(tracker.X[0].clone())
              ap_covs.append(torch.diag(tracker.P[0]).clone())
 
@@ -752,7 +782,6 @@ def filter_rollouts(loader,
              box_scales = np.min(np.stack((boxes[:,2],boxes[:,2]*boxes[:,3]),axis = 1),axis = 1) #/2.0
                  
              #expand box slightly
-             ber = 2.15
              box_scales = box_scales * ber# box expansion ratio
              
              new_boxes[:,1] = boxes[:,0] - box_scales/2
@@ -767,12 +796,26 @@ def filter_rollouts(loader,
              # crop using roi align
              crops = roi_align(frames,torch_boxes,(224,224))
              
-             _,reg_out = localizer(crops)
+             
+             new_prevs = torch.zeros(prevs.shape)
+             new_prevs[:,0] = prevs[:,0] - new_boxes[:,1]
+             new_prevs[:,1] = prevs[:,1] - new_boxes[:,2]
+             new_prevs[:,2] = prevs[:,2] - new_boxes[:,1]
+             new_prevs[:,3] = prevs[:,3] - new_boxes[:,2]
+             new_prevs = new_prevs * 224/torch.from_numpy(box_scales).unsqueeze(1).repeat(1,4)   
+                
+             wer = 3
+             scaled_prevs = (new_prevs + 224*(wer-1)/2.0)/(224*wer) 
+             scaled_prevs = scaled_prevs.to(device).float()
+             
+             
+             _,reg_out = localizer(crops,scaled_prevs)
              torch.cuda.synchronize()
      
              # 5b. convert to global image coordinates 
                  
              # these detections are relative to crops - convert to global image coords
+             wer = 3 # window expansion ratio, was set during training
              
              detections = (reg_out* 224*wer - 224*(wer-1)/2)
              detections = detections.data.cpu()
@@ -806,7 +849,6 @@ def filter_rollouts(loader,
              a_posteriori = torch.from_numpy(np.array(objs)).double()
              a_posteriori_iou[frame_idx].append(iou(a_posteriori,gt))
              
-             
              apst_states.append(tracker.X[0].clone())
              apst_covs.append(torch.diag(tracker.P[0]).clone())
              
@@ -826,15 +868,7 @@ def filter_rollouts(loader,
              
          if iteration % 50 == 0:
              print("Finished iteration {}".format(iteration))
-
-     errors = torch.stack(ap_errors)
-     errors = errors.view(-1,4)
-     mean = torch.mean(errors, dim = 0)    
-     covariance = torch.zeros((4,4))
-     for vec in errors:
-         covariance += torch.mm((vec - mean).unsqueeze(1), (vec-mean).unsqueeze(1).transpose(0,1))
-     covariance = covariance / errors.shape[0]     
-        
+             
      print("------------------Results: --------------------")
     # print("Skewed initialization IOUs: {}".format(sum(skewed_iou)/len(skewed_iou)))
      print("Starting state IOUs: {}".format(sum(starting_iou)/len(starting_iou)))
@@ -846,26 +880,18 @@ def filter_rollouts(loader,
          print("Localizer state IOUs: {}".format(sum(localizer_iou[key])/len(localizer_iou[key])))
          print("A posteriori state IOUs: {}".format(sum(a_posteriori_iou[key])/len(a_posteriori_iou[key])))
          iou_score += sum(a_posteriori_iou[key])/len(a_posteriori_iou[key])
-
-     print("A posteriori estimate error mean: {}".format(mean))
-     print("A posteriori estimate error covariance: \n{}".format(covariance))
-                                                
+                                                     
      iou_score /= key # last key = number of frames in rollout
-     
-     a_priori_noise = {"mean":mean,
-                       "covariance":covariance}
-     with open(os.path.join(data_paths['filter_params'],"apriori_noise.cpkl"),"wb") as f:
-               pickle.dump(a_priori_noise,f)
-     
      return iou_score 
 
-#%% MAIN CODE BLOCK
+#%% Initialize localizer, detector, and kalman filter params
 if __name__ == "__main__":
 
     # define parameters
     b         = 50 # batch size
     n_pre     = 1      # number of frames used to initially tune tracker
-    n_post    = 15     # number of frame irollouts used to evaluate tracker
+    n_post    = 8     # number of frame in rollouts used to evaluate tracker
+    lr_init = 0.0001
     
     # create tracking dataset
     try:
@@ -886,184 +912,276 @@ if __name__ == "__main__":
 
     # get paths to filter parameter save_files
     filter_directory = data_paths['filter_params']
-    INIT = os.path.join(filter_directory,"init_7.cpkl")
-    QFIT = os.path.join(filter_directory,"detrac_7_Q.cpkl")
-    QRFIT = os.path.join(filter_directory,"detrac_7_QR_conf.cpkl")
-    QRRFIT = os.path.join(filter_directory, "detrac_7_QRR_wer.cpkl")
-    QRFIT_RED = os.path.join(filter_directory, "detrac_7_QR_red.cpkl")
+    INIT = "detrac_7_QR_red.cpkl" 
     
-   
-
-    #%% fit model error covariance
-    # with open(INIT,"rb") as f:
-    #     kf_params = pickle.load(f)
-    
-    
-    # fit_Q(loader,
-    #       kf_params,
-    #       n_iterations = 20000,
-    #       save_file = QFIT,
-    #       speed_init = "smooth",
-    #       state_size = 7)    
-    
-    
-     #%% fit measurment error covariance
-    
-    # with open(QFIT,"rb") as f:
-    #     kf_params = pickle.load(f)
-        
-    # use_cuda = torch.cuda.is_available()
-    # device = torch.device("cuda:0" if use_cuda else "cpu")
-
-    # localizer = ResNet34_Localizer()
-    # localizer = ResNet34_Conf_Localizer()
-
-    # resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
-    # resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_wer125_epoch_6.pt"
-    # resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_conf_epoch_2.pt"
-    # cp = torch.load(resnet_checkpoint)
-    # localizer.load_state_dict(cp['model_state_dict']) 
-    # localizer = localizer.to(device)
-    # localizer.eval()
-        
-    # vecs = fit_localizer_R(loader,
-    #                 kf_params, 
-    #                 device, 
-    #                 localizer,
-    #                 bers = [2.0],
-    #                 save_file = QRFIT,
-    #                 n_iterations = 100,
-    #                 wer = 1.25)
-        
-    
-    #%%        Rollouts
-    with open(QRRFIT,"rb") as f:
-        kf_params = pickle.load(f)
-        #kf_params["R"] = kf_params["R"] / 50
-        #kf_params["R"] = kf_params["R"] * torch.tensor([[0.1,0.05,0.05,0.05],[0.05,0.1,0.05,0.05],[0.05,0.05,0.05,0.05],[0.05,0.05,0.05,0.05]])
-
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
-
+    
+    # get localizer
     localizer = ResNet34_Conf_Localizer()
-
-    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
-    resnet_checkpoint   = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_beta_width.pt"
-    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_wer125_epoch_6.pt"
-    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_conf_epoch_2.pt"
-
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_TRACKTOR_SAVE_3.pt"
     cp = torch.load(resnet_checkpoint)
     localizer.load_state_dict(cp['model_state_dict']) 
     localizer = localizer.to(device)
-    localizer.eval()
+    localizer.train()
     
-    filter_rollouts(loader,
-                    kf_params,
-                    localizer,
-                    device,
-                    n_iterations = 50,
-                    ber = 2.0,
-                    skew_ratio = 0,
-                    PLOT = False,
-                    wer = 1.25)
+    # freeze all but ensemble layer of localizer
+    
+    box_loss = Box_Loss()
+    optimizer = optim.Adam(model.parameters(), lr=lr_init)
+    
+#%% Using tuned filter, roll out batches and save the n-1 and nth labels for each frame n temporarily
+speed_init = "smooth" 
+skew_ratio = 1
+degradation = np.array([2,2,4,0.01]) *skew_ratio # should roughly equal localizer error covariance
+plot = False
+
+kf_params = pickle.load(INIT)
+
+skewed_iou = []        # how far off each skewed measurement is during init
+starting_iou = []     # after initialization, how far off are we
+a_priori_iou = {}      # after prediction step, how far off is the state
+localizer_iou = {}     # how far off is the localizer
+a_posteriori_iou = {}  # after updating, how far off is the state
+
+for i in range(n_pre,n_pre+n_post):
+    a_priori_iou[i] = []
+    localizer_iou[i] = []
+    a_posteriori_iou[i] = []
+
+model_errors = []
+meas_errors = []
 
 
-    #%% Fit R2 for detector
-    with open(QRFIT,"rb") as f:
-        kf_params = pickle.load(f)
+for iteration in range(n_iterations):
     
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda:0" if use_cuda else "cpu")
+    batch,ims = next(iter(loader))
     
-    # Create the model
-    checkpoint_file = "detrac_retinanet_4-1.pt"
-    retinanet = resnet50(num_classes=13, pretrained=True)
-    retinanet.load_state_dict(torch.load(checkpoint_file).state_dict())
-    
-    checkpoint_file = "detrac_retinanet_epoch7.pt"
-    temp = torch.load(checkpoint_file)["model_state_dict"]
-    new = {}
-    for key in temp:
-        new_key = key.split("module.")[-1]
-        new[new_key] = temp[key]
-    retinanet.load_state_dict(new)
-    
-    retinanet = retinanet.to(device)
-    retinanet.eval()
-    
-    try:
-        det_loader
-    except:
-        det_dataset = Detection_Dataset(train_im_dir, train_lab_dir)
-        params = {'batch_size' : 1,
-                      'shuffle'    : True,
-                      'num_workers': 0,
-                      'drop_last'  : True,
-                      "collate_fn" : collate
-                      }
-        det_loader = DataLoader(det_dataset, **params)
+    # initialize tracker
+    tracker = Torch_KF("cpu",INIT = kf_params, ADD_MEAN_Q = True, ADD_MEAN_R = False)
 
-    fit_detector_R(det_loader,
-                   kf_params, 
-                   device, 
-                   retinanet,
-                   save_file = QRRFIT,
-                   n_iterations = 5000)
+    obj_ids = [i for i in range(len(batch))]
     
-    #%% Based on original filter params, find the optimal reduction in covariance for each parameter separately
-    with open(QRFIT,"rb") as f:
-        kf_params = pickle.load(f)
-        #kf_params["R"] = kf_params["R"] / 20
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda:0" if use_cuda else "cpu")
+    if speed_init == "smooth":
+        tracker.add(batch[:,0,:state_size],obj_ids)
+    else:
+        tracker.add(batch[:,0,:4],obj_ids)
+    
+    # initialize storage
+    ap_states = []
+    ap_covs = []
+    loc_meas = []
+    apst_states = []
+    apst_covs = []
+    gts = []
+    
+    apst_states.append(tracker.X[0].clone())
+    apst_covs.append(torch.diag(tracker.P[0]).clone())
+    gts.append(batch[0,n_pre-1,:].clone())
+    
+    # initialize tracker
+    for frame in range(1,n_pre):
+        tracker.predict()
+        
+        # here, rather than updating with ground truth we degrade ground truth by some amount
+        measurement = batch[:,frame,:4]
+        skew = np.random.normal(0,degradation,(len(batch),4))
+        measurement_skewed = measurement + skew
+        
+        skewed_iou.append(iou(measurement,measurement_skewed))
+        tracker.update2(measurement_skewed,obj_ids)
+        
+    
+    # cumulative error so far
+    objs = tracker.objs()
+    objs = [objs[key] for key in objs]
+    starting = torch.from_numpy(np.array(objs)).double()
+    starting_iou.append(iou(starting,batch[:,n_pre-1,:]))
+    
+    avg_loss = 0 
+    count = 0
+    
+    for frame_idx in range(n_pre,n_pre + n_post):
+        gt = batch[:,frame_idx,:]
 
-    localizer = ResNet34_Localizer()
-    resnet_checkpoint   = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_beta_width.pt"
-    cp = torch.load(resnet_checkpoint)
-    localizer.load_state_dict(cp['model_state_dict']) 
-    localizer = localizer.to(device)
-    localizer.eval()
+        # get a priori error
+        tracker.predict()
+        objs = tracker.objs()
+        objs = [objs[key] for key in objs]
+        
+        #prev = batch[:,frame_idx-1,:4]
+        prev = tracker.X[:,:4]
+        # prevs = objs
+        # prevs = [torch.from_numpy(item)[:4] for item in prevs]
+        # prev = torch.stack(prevs)
+        
+        prevs = torch.zeros(prev.shape)
+        prevs[:,0] = prev[:,0] - prev[:,2]/2.0
+        prevs[:,2] = prev[:,0] + prev[:,2]/2.0
+        prevs[:,1] = prev[:,1] - prev[:,2]*prev[:,3]/2.0
+        prevs[:,3] = prev[:,1] + prev[:,2]*prev[:,3]/2.0
+       
+        targs = torch.zeros(prev.shape)
+        targs[:,0] = gt[:,0] - gt[:,2]/2.0
+        targs[:,2] = gt[:,0] + gt[:,2]/2.0
+        targs[:,1] = gt[:,1] - gt[:,2]*gt[:,3]/2.0
+        targs[:,3] = gt[:,1] + gt[:,2]*gt[:,3]/2.0
+        
+        a_priori = torch.from_numpy(np.array(objs)).double()
+        a_priori_iou[frame_idx].append(iou(a_priori,gt))
     
-    
-    orig = kf_params["R"].clone()
-    reductions = np.zeros(kf_params["R"].shape)
-    
-    # for each parameter
-    for i in range(3,4):#len(kf_params["R"])):
-        for j in range(i,i+1):#len(kf_params["R"])):
-            print("On parameter ({},{})".format(i,j))
-            
-            best_score = 0
-            for reduction in [0.1,0.4,0.6,0.8,1,2,3,5,10]:
-                kf_params["R"][i,j] = orig[i,j] * reduction
-                if i != j:
-                    kf_params["R"][j,i] = orig[j,i] * reduction
+        ap_states.append(tracker.X[0].clone())
+        ap_covs.append(torch.diag(tracker.P[0]).clone())
 
-                iou_score = filter_rollouts(loader,
-                                            kf_params,
-                                            localizer,
-                                            device,
-                                            n_iterations = 5,
-                                            ber = 2.0,
-                                            skew_ratio = 0,
-                                            PLOT = False)
-                print("^ score for reduction {}".format(reduction))
-                if iou_score > best_score:
-                    best_score = iou_score
-                    reductions[i,j] = reduction
-                    reductions[j,i] = reduction
+        # at this point, we have gt, the correct bounding boxes for this frame, 
+        # and the tracker states, the estimate of the state for this frame
+        # expand state estimate and get localizer prediction
+        # shift back into global coordinates
+        
+        # ims are collated by frame,then batch index
+        relevant_ims = ims[frame_idx]
+        frames =[]
+        for item in relevant_ims:
+            with Image.open(item) as im:
+                   im = F.to_tensor(im)
+                   frame = F.normalize(im,mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+                   # #correct smaller frames
+                   # if frame.shape[1] < 540:
+                   #    new_frame = torch.zeros([3,375,frame.shape[2]])
+                   #    new_frame[:,:frame.shape[1],:] = frame
+                   #    frame = new_frame
+                   # if frame.shape[2] < 1242:
+                   #    new_frame = torch.zeros([3,375,1242])
+                   #    new_frame[:,:,:frame.shape[2]] = frame
+                   #    frame = new_frame   
+                   
+                   frames.append(frame)
+        frames = torch.stack(frames).to(device)
+        
+        # crop image
+        boxes = a_priori
+        
+        # convert xysr boxes into xmin xmax ymin ymax
+        # first row of zeros is batch index (batch is size 0) for ROI align
+        new_boxes = np.zeros([len(boxes),5]) 
+
+        # use either s or s x r for both dimensions, whichever is larger,so crop is square
+        #box_scales = np.max(np.stack((boxes[:,2],boxes[:,2]*boxes[:,3]),axis = 1),axis = 1)
+        box_scales = np.min(np.stack((boxes[:,2],boxes[:,2]*boxes[:,3]),axis = 1),axis = 1) #/2.0
             
-            # after all have been tried, update parameter in kf_params with optimal value
-            kf_params["R"][i,j] = orig[i,j] * reductions[i,j]
-            if i != j:
-                kf_params["R"][j,i] = orig[j,i] * reductions[j,i]
-            print("best reduction for  parameter ({},{}) : {}".format(i,j,reductions[i,j]))
+        #expand box slightly
+        box_scales = box_scales * ber# box expansion ratio
+        
+        new_boxes[:,1] = boxes[:,0] - box_scales/2
+        new_boxes[:,3] = boxes[:,0] + box_scales/2 
+        new_boxes[:,2] = boxes[:,1] - box_scales/2 
+        new_boxes[:,4] = boxes[:,1] + box_scales/2 
+        for i in range(len(new_boxes)):
+            new_boxes[i,0] = i # set image index for each
             
-    with open(QRFIT_RED,"wb") as f:
-        pickle.dump(kf_params,f)
-    
-    # do filter rollouts, and keep the Average IOU across all 15 frames 
+        torch_boxes = torch.from_numpy(new_boxes).float().to(device)
+        
+        # crop using roi align
+        crops = roi_align(frames,torch_boxes,(224,224))
+        
+        
+        new_prevs = torch.zeros(prevs.shape)
+        new_prevs[:,0] = prevs[:,0] - new_boxes[:,1]
+        new_prevs[:,1] = prevs[:,1] - new_boxes[:,2]
+        new_prevs[:,2] = prevs[:,2] - new_boxes[:,1]
+        new_prevs[:,3] = prevs[:,3] - new_boxes[:,2]
+        new_prevs = new_prevs * 224/torch.from_numpy(box_scales).unsqueeze(1).repeat(1,4)   
+        
+        new_targs = torch.zeros(targs.shape)
+        new_targs[:,0] = targs[:,0] - new_boxes[:,1]
+        new_targs[:,1] = targs[:,1] - new_boxes[:,2]
+        new_targs[:,2] = targs[:,2] - new_boxes[:,1]
+        new_targs[:,3] = targs[:,3] - new_boxes[:,2]
+        new_targs = new_targs * 224/torch.from_numpy(box_scales).unsqueeze(1).repeat(1,4)   
+        
+        wer = 3
+        scaled_prevs = (new_prevs + 224*(wer-1)/2.0)/(224*wer) 
+        scaled_prevs = scaled_prevs.to(device).float()
+        
+        scaled_targs = (new_targs + 224 *(wer-1)/2.0)/(224*wer)
+        scaled_targs = scaled_targs.to(device).float()
+        
+        with torch.set_grad_enabled(True): 
+            _,reg_out = localizer(crops,scaled_prevs)
+            torch.cuda.synchronize()
             
+            loss = box_loss(reg_out,scaled_targs)
+            loss.backward()
+            optimizer.step()
+            torch.zero_grad()
             
+            avg_loss += loss.item()
+            count += 1
             
-            
+        # 5b. convert to global image coordinates 
+       
+        # these detections are relative to crops - convert to global image coords
+        wer = 3 # window expansion ratio, was set during training
+       
+        detections = (reg_out* 224*wer - 224*(wer-1)/2)
+        detections = detections.data.cpu()
+       
+        # add in original box offsets and scale outputs by original box scales
+        detections[:,0] = detections[:,0]*box_scales/224 + new_boxes[:,1]
+        detections[:,2] = detections[:,2]*box_scales/224 + new_boxes[:,1]
+        detections[:,1] = detections[:,1]*box_scales/224 + new_boxes[:,2]
+        detections[:,3] = detections[:,3]*box_scales/224 + new_boxes[:,2]
+        
+       
+        # convert into xysr form 
+        output = np.zeros([len(detections),4])
+        output[:,0] = (detections[:,0] + detections[:,2]) / 2.0
+        output[:,1] = (detections[:,1] + detections[:,3]) / 2.0
+        output[:,2] = (detections[:,2] - detections[:,0])
+        output[:,3] = (detections[:,3] - detections[:,1]) / output[:,2]
+        pred = torch.from_numpy(output)
+         
+        # evaluate localizer
+        localizer_iou[frame_idx].append(iou(pred,gt))
+        error = (gt[:,:4]-pred)
+        meas_errors.append(error)
+        
+        loc_meas.append(pred[0].clone())
+        
+        # evaluate a posteriori estimate
+        tracker.update(pred,obj_ids)
+        objs = tracker.objs()
+        objs = [objs[key] for key in objs]
+        a_posteriori = torch.from_numpy(np.array(objs)).double()
+        a_posteriori_iou[frame_idx].append(iou(a_posteriori,gt))
+        
+        apst_states.append(tracker.X[0].clone())
+        apst_covs.append(torch.diag(tracker.P[0]).clone())
+        
+        gts.append(gt[0].clone())
+        
+    avg_iou = sum(a_posteriori_iou[n_post])/len(a_posteriori_iou[n_post])
+    avg_loss = avg_loss/count
+    print("Iteration {}: avg loss {}, avg iou @ {} frames: {}".format(iteration,avg_loss,n_post,avg_iou))
+       
+    if PLOT and iteration < 10:
+        plot_states(ap_states,
+                    ap_covs,
+                    loc_meas,
+                    apst_states,
+                    apst_covs,
+                    gts,
+                    save_num = iteration)
+        #break
+    elif PLOT:
+        break
+        
+    if iteration % 50 == 0:
+        print("Finished iteration {}".format(iteration))
+
+
+   
+#%% fit measurement covariance based on current output of localizer
+
+#%% fine-tune R with gradient descent until average hasn't improved for say 500 steps

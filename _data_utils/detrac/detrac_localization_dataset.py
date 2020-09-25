@@ -10,6 +10,7 @@ import os,sys
 import numpy as np
 import random 
 import math
+import _pickle as pickle
 random.seed = 0
 
 import cv2
@@ -50,6 +51,9 @@ class Localize_Dataset(data.Dataset):
         for item in os.listdir(label_dir):
             name = item.split("_v3.xml")[0]
             label_list[name] = self.parse_labels(os.path.join(label_dir,item))
+        
+        with open ("/home/worklab/Documents/code/tracking-by-localization/config/filter_params/apriori_noise.cpkl","rb") as f:
+            self.noise_params = pickle.load(f)
         
         self.im_tf = transforms.Compose([
                 transforms.RandomApply([
@@ -144,20 +148,32 @@ class Localize_Dataset(data.Dataset):
         # copy so that original coordinates aren't overwritten
         bbox = label["bbox"].copy()
         
-        # If no previous label, simply take ground truth and distort it by a bit
-        if prev_label is None:
-            pbox = bbox
-        else:
-            
-            pbox = prev_label["bbox"].copy()
-            
-        # add noise to previous bbox
-        width_noise = np.random.rand(2)*4-2
-        x_noise = np.random.rand(2)*15-7.5     
-        pbox[0] = pbox[0] + x_noise[0] + width_noise[0] /2.0 
-        pbox[1] = pbox[1] + x_noise[1] + width_noise[1] /2.0 
-        pbox[2] = pbox[2] + x_noise[0] - width_noise[0] /2.0 
-        pbox[3] = pbox[3] + x_noise[1] - width_noise[1] /2.0 
+        # use ground truth plus apriori noise distribution as prior     
+        pbox = label["bbox"].copy()
+        
+        ### Instead, here we'll try feeding previous bbox + R and mu_R added as noise
+        mean = self.noise_params["mean"]
+        covariance = self.noise_params["covariance"] *0.25
+        noise = np.random.multivariate_normal(mean, covariance)
+        
+        # pbox[0] = pbox[0] + noise[0] -          noise[2] /2.0
+        # pbox[1] = pbox[1] + noise[1] - noise[2]*noise[3] /2.0
+        # pbox[2] = pbox[2] + noise[0] +          noise[2] /2.0
+        # pbox[3] = pbox[3] + noise[1] + noise[2]*noise[3] /2.0
+        
+        # convert to xysr to apply noise to prevent correlation errors
+        pnew = np.zeros(pbox.shape)
+        pnew[0] = (pbox[0] + pbox[2]) /2.0
+        pnew[1] = (pbox[1] + pbox[3]) /2.0
+        pnew[2] = (pbox[2] - pbox[0])  
+        pnew[3] = (pbox[3] - pbox[1])  /pnew[2]
+        pnew = pnew + noise
+        
+        # convert back to xyxy
+        pbox[0] = pnew[0] - pnew[2]/2.0
+        pbox[1] = pnew[1] - pnew[2]*pnew[3]/2.0
+        pbox[2] = pnew[0] + pnew[2]/2.0
+        pbox[3] = pnew[1] + pnew[2]*pnew[3]/2.0
         
         # flip sometimes
         if np.random.rand() > 0.5:

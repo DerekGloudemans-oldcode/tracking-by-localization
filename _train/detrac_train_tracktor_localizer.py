@@ -117,7 +117,7 @@ def train_model(model, optimizer, scheduler,losses,
                             for loss_fn in losses['reg']:
                                 loss_comp = loss_fn(reg_out,reg_targets) 
                                 if phase == 'train':
-                                    loss_comp.backward(retain_graph = True)
+                                    loss_comp.backward(retain_graph = False)
                                 each_loss.append(round(loss_comp.item()*10000)/10000.0)
                             
                             # # # backprop loss from offset from previous bbox
@@ -127,18 +127,18 @@ def train_model(model, optimizer, scheduler,losses,
                             # each_loss.append(round(offset_loss.item()*10000)/10000.0)
                               
                             # backprop width loss here
-                            loss_comp = width_loss(reg_out,reg_prevs) * 10
-                            if phase == 'train':
-                                loss_comp.backward(retain_graph = True)
-                            each_loss.append(round(loss_comp.item()*10000)/10000.0)  
+                            # loss_comp = width_loss(reg_out,reg_prevs) * 10
+                            # if phase == 'train':
+                            #     loss_comp.backward(retain_graph = True)
+                            # each_loss.append(round(loss_comp.item()*10000)/10000.0)  
                             
-                            # apply each cls loss function
-                            cls_targets = targets[:,4]
-                            for loss_fn in losses['cls']:
-                                loss_comp = loss_fn(cls_out.float(),cls_targets.long()) /10.0
-                                if phase == 'train':
-                                    loss_comp.backward()
-                                each_loss.append(round(loss_comp.item()*10000)/10000.0)
+                            # # apply each cls loss function
+                            # cls_targets = targets[:,4]
+                            # for loss_fn in losses['cls']:
+                            #     loss_comp = loss_fn(cls_out.float(),cls_targets.long()) /10.0
+                            #     if phase == 'train':
+                            #         loss_comp.backward()
+                            #     each_loss.append(round(loss_comp.item()*10000)/10000.0)
                            
                             
                             # backpropogate loss and adjust model weights
@@ -199,7 +199,7 @@ def train_model(model, optimizer, scheduler,losses,
 
                 if avg_loss < best_loss:
                     # save a checkpoint
-                    PATH = "detrac_resnet34_tracktor_epoch{}.pt".format(epoch)
+                    PATH = "apriori_tracktor_{}.pt".format(epoch)
                     torch.save({
                         'epoch': epoch,
                         'model_state_dict': model.state_dict(),
@@ -473,17 +473,18 @@ def tracktor1_2_convert(model,cp):
 if __name__ == "__main__":
     
     checkpoint_file = "TRACKTOR_SAVE_3.pt"
+    checkpoint_file = "TRACKTOR_SAVE_2.pt"
+    checkpoint_file = "apriori_tracktor_4.pt"
     #checkpoint_file = "TRACKTOR_SAVE.pt"#
     #checkpoint_file = None
-    patience = 1
-    lr_init = 0.0000001
+    patience = 3
+    lr_init = 0.0001
         
     label_dir       = data_paths["train_lab"]
     train_image_dir = data_paths["train_partition"]
     test_image_dir  = data_paths["val_partition"]
     
     
-    #################### Change nothing below here #######################
     
     # 1. CUDA for PyTorch
     use_cuda = torch.cuda.is_available()
@@ -529,17 +530,19 @@ if __name__ == "__main__":
     #optimizer = optim.SGD(model.parameters(), lr = lr_init, momentum = 0.3)
     
     #freeze all but last layer
-    # for param in model.parameters():
-    #     param.requires_grad = False
-    # for param in model.regressor2.parameters():
-    #     param.requires_grad = True
+    for param in model.parameters():
+        param.requires_grad = False
+    for param in model.regressor2.parameters():
+        param.requires_grad = True
 
       
     
     optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr = lr_init, momentum = 0.9)    
-    
+    optimizer = optim.Adam(model.parameters(), lr=lr_init)
+
+
     # 7. define start epoch for consistent labeling if checkpoint is 
-    exp_lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, verbose = True, mode = "min", patience = patience, factor=0.3)
+    exp_lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, verbose = True, mode = "min", patience = 0, factor=0.3)
     start_epoch = -1
     all_metrics = None
 
@@ -558,19 +561,19 @@ if __name__ == "__main__":
 
         
     # 9. define losses
-    losses = {"cls": [nn.CrossEntropyLoss()],
-              "reg": [nn.MSELoss(),Box_Loss(),]
-              }
-    
-    # losses = {"cls": [],
-    #           "reg": [Box_Loss()]
+    # losses = {"cls": [nn.CrossEntropyLoss()],
+    #           "reg": [nn.MSELoss(),Box_Loss(),]
     #           }
     
-    #optimizer = optim.Adam(model.parameters(), lr=lr_init)
+    losses = {"cls": [],
+              "reg": [Box_Loss()]
+              }
+    
+    optimizer = optim.Adam(model.parameters(), lr=lr_init)
 
-    for param in model.parameters():
-        param.requires_grad = True
-    optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr = lr_init, momentum = 0.3)    
+    # for param in model.parameters():
+    #     param.requires_grad = True
+    # optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr = lr_init, momentum = 0.3)    
 
 
 
@@ -583,7 +586,7 @@ if __name__ == "__main__":
                             losses,
                             dataloaders,
                             device,
-                            patience = patience*2,
+                            patience = patience,
                             start_epoch = start_epoch+1,
                             all_metrics = all_metrics,
                             width_loss = Width_Loss())

@@ -56,13 +56,14 @@ all_results = {
                "ground_truth":{},
                "kf":{},
                "none":{},
-               "skip1":{}
+               "skip1":{},
+               "apriori":{}
                }
 
 
 
 for sub_dir in os.listdir(result_dir):
-    if sub_dir in ["retinanet_test","ACF_test","CompACT_test","DPM_test","ground_truth_test","RCNN_test","retinanet_wer_test","kf_test","none_test","skip1_test"]:
+    if sub_dir in ["retinanet_test","ACF_test","CompACT_test","DPM_test","ground_truth_test","RCNN_test","retinanet_wer_test","kf_test","none_test","skip1_test","apriori_test"]:
         detector = sub_dir.split("_test")[0]
         sub_dir = os.path.join(result_dir,sub_dir)
         
