@@ -312,8 +312,8 @@ def fit_localizer_R(loader,
             for idx,item in enumerate(relevant_ims):
                 with Image.open(item) as im:
                        im = F.to_tensor(im)
-                       frame = F.normalize(im,mean=[0.3721, 0.3880, 0.3763],
-                             std=[0.0555, 0.0584, 0.0658])
+                       frame = F.normalize(im,mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
                        #correct smaller frames
                        # if frame.shape[1] < 375:
                        #    new_frame = torch.zeros([3,375,frame.shape[2]])
@@ -439,7 +439,7 @@ def fit_localizer_R(loader,
                     axs[i//row_size,i%row_size].set_xticks([])
                     axs[i//row_size,i%row_size].set_yticks([])
                     plt.pause(.001)    
-                plt.close()
+                #plt.close()
                 
                 
             # add in original box offsets and scale outputs by original box scales
@@ -596,7 +596,7 @@ def filter_rollouts(loader,
                     kf_params,
                     localizer,
                     device,
-                    n_iterations = 100,
+                    n_iterations = 5,
                     ber = 2.0, 
                     skew_ratio = 0,
                     PLOT = True,
@@ -630,7 +630,7 @@ def filter_rollouts(loader,
      
          obj_ids = [i for i in range(len(batch))]
          
-         if speed_init == "smooth":
+         if speed_init == "smosoth":
              tracker.add(batch[:,0,:state_size],obj_ids)
          else:
              tracker.add(batch[:,0,:4],obj_ids)
@@ -800,7 +800,7 @@ def filter_rollouts(loader,
              loc_meas.append(pred[0].clone())
              
              # evaluate a posteriori estimate
-             tracker.update(pred,obj_ids)
+             #tracker.update(pred,obj_ids)
              objs = tracker.objs()
              objs = [objs[key] for key in objs]
              a_posteriori = torch.from_numpy(np.array(objs)).double()
@@ -886,71 +886,78 @@ if __name__ == "__main__":
 
     # get paths to filter parameter save_files
     filter_directory = data_paths['filter_params']
-    INIT = os.path.join(filter_directory,"init_7.cpkl")
-    QFIT = os.path.join(filter_directory,"detrac_7_Q.cpkl")
-    QRFIT = os.path.join(filter_directory,"detrac_7_QR_conf.cpkl")
-    QRRFIT = os.path.join(filter_directory, "detrac_7_QRR_wer.cpkl")
-    QRFIT_RED = os.path.join(filter_directory, "detrac_7_QR_red.cpkl")
+    INIT = os.path.join(filter_directory,"init_6.cpkl")
+    QFIT = os.path.join(filter_directory,"detrac_6_Q.cpkl")
+    QRFIT = os.path.join(filter_directory,"detrac_6_QR_width.cpkl")
+    QRRFIT = os.path.join(filter_directory, "detrac_6_QRR_width.cpkl")
+    QRFIT_RED = os.path.join(filter_directory, "detrac_6_QR_red.cpkl")
     
    
 
     #%% fit model error covariance
-    # with open(INIT,"rb") as f:
-    #     kf_params = pickle.load(f)
+    with open(INIT,"rb") as f:
+        kf_params = pickle.load(f)
     
     
-    # fit_Q(loader,
-    #       kf_params,
-    #       n_iterations = 20000,
-    #       save_file = QFIT,
-    #       speed_init = "smooth",
-    #       state_size = 7)    
+    fit_Q(loader,
+          kf_params,
+          n_iterations = 20000,
+          save_file = QFIT,
+          speed_init = "smooth",
+          state_size = 6)    
     
     
      #%% fit measurment error covariance
     
-    # with open(QFIT,"rb") as f:
-    #     kf_params = pickle.load(f)
+    with open(QFIT,"rb") as f:
+        kf_params = pickle.load(f)
         
-    # use_cuda = torch.cuda.is_available()
-    # device = torch.device("cuda:0" if use_cuda else "cpu")
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda:0" if use_cuda else "cpu")
 
-    # localizer = ResNet34_Localizer()
-    # localizer = ResNet34_Conf_Localizer()
+    localizer = ResNet34_Localizer()
+    #localizer = ResNet34_Conf_Localizer()
 
-    # resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
-    # resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_wer125_epoch_6.pt"
-    # resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_conf_epoch_2.pt"
-    # cp = torch.load(resnet_checkpoint)
-    # localizer.load_state_dict(cp['model_state_dict']) 
-    # localizer = localizer.to(device)
-    # localizer.eval()
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_wer125_epoch_6.pt"
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_conf_epoch_2.pt"
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_width_epoch_10.pt"
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_incentive_epoch_19.pt"
+    
+
+    cp = torch.load(resnet_checkpoint)
+    localizer.load_state_dict(cp['model_state_dict']) 
+    localizer = localizer.to(device)
+    localizer.eval()
         
-    # vecs = fit_localizer_R(loader,
-    #                 kf_params, 
-    #                 device, 
-    #                 localizer,
-    #                 bers = [2.0],
-    #                 save_file = QRFIT,
-    #                 n_iterations = 100,
-    #                 wer = 1.25)
+    vecs = fit_localizer_R(loader,
+                    kf_params, 
+                    device, 
+                    localizer,
+                    bers = [2.0,2.05,2.1,2.15,2.2,2.25,2.3,2.35,2.4,2.45,2.5],
+                    save_file = QRFIT,
+                    n_iterations = 200,
+                    wer = 1.25)
         
     
     #%%        Rollouts
     with open(QRRFIT,"rb") as f:
         kf_params = pickle.load(f)
-        #kf_params["R"] = kf_params["R"] / 50
-        #kf_params["R"] = kf_params["R"] * torch.tensor([[0.1,0.05,0.05,0.05],[0.05,0.1,0.05,0.05],[0.05,0.05,0.05,0.05],[0.05,0.05,0.05,0.05]])
+        #kf_params["R"] = torch.eye(4) * 0.0000001
+       #kf_params["R"] = kf_params["R"] * torch.tensor([[0.1,0.05,0.05,0.05],[0.05,0.1,0.05,0.05],[0.05,0.05,0.05,0.05],[0.05,0.05,0.05,0.05]])
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
-    localizer = ResNet34_Conf_Localizer()
-
-    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
-    resnet_checkpoint   = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_beta_width.pt"
+    #localizer = ResNet34_Conf_Localizer()
+    localizer = ResNet34_Localizer()
+    #resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
+    #resnet_checkpoint   = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_beta_width.pt"
     resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_wer125_epoch_6.pt"
-    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_conf_epoch_2.pt"
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_width_epoch_10.pt"
+    resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_incentive_epoch_19.pt"
+
+    #resnet_checkpoint = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_conf_epoch_2.pt"
 
     cp = torch.load(resnet_checkpoint)
     localizer.load_state_dict(cp['model_state_dict']) 
@@ -961,26 +968,26 @@ if __name__ == "__main__":
                     kf_params,
                     localizer,
                     device,
-                    n_iterations = 50,
-                    ber = 2.0,
+                    n_iterations = 5,
+                    ber = 2.3,
                     skew_ratio = 0,
                     PLOT = False,
+                    state_size = 6,
                     wer = 1.25)
 
 
     #%% Fit R2 for detector
     with open(QRFIT,"rb") as f:
         kf_params = pickle.load(f)
-    
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
     
     # Create the model
     checkpoint_file = "detrac_retinanet_4-1.pt"
     retinanet = resnet50(num_classes=13, pretrained=True)
-    retinanet.load_state_dict(torch.load(checkpoint_file).state_dict())
+    # retinanet.load_state_dict(torch.load(checkpoint_file).state_dict())
     
-    checkpoint_file = "detrac_retinanet_epoch7.pt"
+    checkpoint_file = "/home/worklab/Documents/code/tracking-by-localization/_train/detrac_retinanet_epoch7.pt"
     temp = torch.load(checkpoint_file)["model_state_dict"]
     new = {}
     for key in temp:

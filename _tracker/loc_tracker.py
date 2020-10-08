@@ -179,7 +179,7 @@ class Localization_Tracker():
                 new_array[cur_row,:] = detections[i,:4]
 
                 self.fsld[self.next_obj_id] = 0
-                self.all_tracks[self.next_obj_id] = np.zeros([self.n_frames,7])
+                self.all_tracks[self.next_obj_id] = np.zeros([self.n_frames,6])
                 self.all_classes[self.next_obj_id] = np.zeros(13)
                 
                 self.next_obj_id += 1
@@ -638,7 +638,7 @@ class Localization_Tracker():
                 self.manage_tracks(detections,matchings,pre_ids)
                 
             # skip  if there are no active tracklets or no localizer (KF prediction with no update)    
-            elif len(pre_locations) > 0 and self.localizer is not None and (frame_num % self.d)%2 == 0:
+            elif len(pre_locations) > 0 and self.localizer is not None:# and (frame_num % self.d)%2 == 0:
                 
                 # get crop for each active tracklet
                 crops,new_boxes,box_ids,box_scales = self.crop_tracklets(pre_locations,frame)
@@ -693,7 +693,7 @@ class Localization_Tracker():
                 post_locations = {}
             for id in post_locations:
                 try:
-                   self.all_tracks[id][frame_num,:] = post_locations[id][:7]   
+                   self.all_tracks[id][frame_num,:] = post_locations[id][:6]   
                 except IndexError:
                     print("Index Error")
             self.time_metrics['store'] += time.time() - start  

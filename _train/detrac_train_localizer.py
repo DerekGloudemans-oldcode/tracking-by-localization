@@ -78,9 +78,10 @@ def train_model(model, optimizer, scheduler,losses,
                 count = 0
                 total_loss = 0
                 total_acc = 0
-                for inputs, targets,_ in dataloaders[phase]:
+                for inputs, targets,_,incentives in dataloaders[phase]:
                     inputs = inputs.to(device)
                     targets = targets.to(device)
+                    incentives = incentives[:,3].to(device)
                     
                     # zero the parameter gradients
                     optimizer.zero_grad()
@@ -100,7 +101,11 @@ def train_model(model, optimizer, scheduler,losses,
                         
                         try:
                             for loss_fn in losses['reg']:
-                                loss_comp = loss_fn(reg_out.float(),reg_targets.float()) 
+                                if phase == "train":
+                                    loss_comp = loss_fn(reg_out.float(),reg_targets.float(),incentives = incentives.float()) 
+                                else:
+                                    loss_comp = loss_fn(reg_out.float(),reg_targets.float()) 
+
                                 if phase == 'train':
                                     loss_comp.backward(retain_graph = True)
                                 each_loss.append(round(loss_comp.item()*100000)/100000.0)
@@ -144,7 +149,7 @@ def train_model(model, optimizer, scheduler,losses,
 
                 if avg_loss < best_loss:
                     # save a checkpoint
-                    PATH = "detrac_resnet34_conf_epoch_{}.pt".format(epoch)
+                    PATH = "incentive_epoch_{}.pt".format(epoch)
                     torch.save({
                         
                         'epoch': epoch,
@@ -185,7 +190,7 @@ class Box_Loss(nn.Module):
     def __init__(self):
         super(Box_Loss,self).__init__()
         
-    def forward(self,output,target,epsilon = 1e-07):
+    def forward(self,output,target,epsilon = 1e-07,incentives = None):
         """ Compute the bbox iou loss for target vs output using tensors to preserve
         gradients for efficient backpropogation"""
         
@@ -205,8 +210,14 @@ class Box_Loss(nn.Module):
         #a2,_ = torch.max(torch.cat((a2.unsqueeze(1),zeros),1),1)
         union = a1 + a2 - intersection 
         iou = intersection / (union + epsilon)
-        #iou = torch.clamp(iou,0)
-        return 1- iou.sum()/(len(iou)+epsilon)
+        iou = torch.clamp(iou,0)
+        iou_loss = 1- iou
+        
+        if incentives is not None:
+            iou_loss = iou_loss * incentives
+         
+
+        return iou_loss.sum()/(len(iou_loss)+epsilon)
     
 class Width_Loss(nn.Module):        
     def __init__(self):
@@ -323,10 +334,10 @@ def move_dual_checkpoint_to_cpu(model,optimizer,checkpoint):
 #------------------------------ Main code here -------------------------------#
 if __name__ == "__main__":
     
-    checkpoint_file = None#"detrac_resnet34_wer125_epoch6.pt"
+    checkpoint_file = "WORKING_epoch_10.pt"
     
-    patience = 3
-    lr_init = 0.001
+    patience = 2
+    lr_init = 0.01
     
     label_dir       = data_paths["train_lab"]
     train_image_dir = data_paths["train_partition"]
@@ -347,6 +358,7 @@ if __name__ == "__main__":
     
     # 2. load model
     model = ResNet34_Localizer()
+    #model = resnet34(13,pretrained = True)
     # cp = "cpu_detrac_resnet34_alpha.pt"
     # cp = torch.load(cp)
     # model.load_state_dict(cp['model_state_dict'])
@@ -386,7 +398,6 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=lr_init)
     #optimizer = optim.SGD(model.parameters(), lr = lr_init, momentum = 0.3)
     # 6. decay LR by a factor of 0.1 every 7 epochs
-    exp_lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, verbose = True, mode = "min", patience = 1, factor=0.3)
     
     # 7. define start epoch for consistent labeling if checkpoint is reloaded
     start_epoch = -1
@@ -400,13 +411,16 @@ if __name__ == "__main__":
      
     # 9. define losses
     losses = {"cls": [nn.CrossEntropyLoss()],
-              "reg": [Width_Loss(), Box_Loss(),]
+              "reg": [Box_Loss()]
               }
     # losses = {"cls": [],
     #             "reg": [nn.MSELoss,Box_Loss()]
     #             }
-    
-    if True:    
+    optimizer = optim.Adam(model.parameters(), lr=lr_init)
+    exp_lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, verbose = True, mode = "min", patience = 0, factor=0.3)
+
+
+    if False:    
     # train model
         print("Beginning training.")
         model,all_metrics = train_model(model,
@@ -418,5 +432,7 @@ if __name__ == "__main__":
                             patience = patience,
                             start_epoch = start_epoch+1,
                             all_metrics = all_metrics)
+        
+    plot_batch(model,(next(iter(testloader))),class_dict)
         
    

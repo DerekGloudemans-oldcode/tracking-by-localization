@@ -26,8 +26,8 @@ class ResNet34_Localizer(nn.Module):
         
         # remove last layers of vgg19 model, save first fc layer and maxpool layer
         #self.feat = models.resnet18(pretrained=True)
-        #self.feat = models.resnet34(pretrained = True)
-        self.feat = models.resnet50(pretrained = True)
+        self.feat = models.resnet34(pretrained = True)
+
         # get size of some layers
         start_num = self.feat.fc.out_features
         mid_num = int(np.sqrt(start_num))

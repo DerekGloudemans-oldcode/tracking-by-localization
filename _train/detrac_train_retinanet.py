@@ -58,7 +58,7 @@ def plot_detections(dataset,retinanet):
     im,label,meta = dataset[idx]
 
     im = im.to(device).unsqueeze(0).float()
-
+    im = im[:,:,:224,:224]
 
 
     with torch.no_grad():
@@ -189,7 +189,8 @@ if __name__ == "__main__":
         for iter_num, (im,label,ignore) in enumerate(trainloader):
             try:
                 optimizer.zero_grad()
-
+                
+                
                 if torch.cuda.is_available():
                     classification_loss, regression_loss = retinanet([im.to(device).float(), label.to(device).float()])
                 else:

@@ -96,6 +96,11 @@ class Localize_Dataset(data.Dataset):
                     for k in range(len(label)):
                         detection = label[k]
                         id = detection["id"]
+                        
+                        trunc = detection["truncation"]
+                        occ = detection["occlusion"]
+                        orient = detection["orientation"]
+                        
                         if j > 0:
                             try:
                                 prev_label = labels[j-1]
@@ -111,7 +116,7 @@ class Localize_Dataset(data.Dataset):
                             except:
                                 prev_detection = None
                         
-                        self.all_data.append((image,detection,prev_detection))
+                        self.all_data.append((image,detection,prev_detection,np.array([trunc,occ,orient])))
 
                 except:
                     # this occurs because Detrac was dumbly labeled and they didn't include empty annotations for frames without objects
@@ -142,7 +147,7 @@ class Localize_Dataset(data.Dataset):
         im = Image.open(cur[0])
         label = cur[1]
         prev_label = cur[2]
-        
+        stats = cur[3]
         
         # crop image so that only relevant portion is showing for one object
         # copy so that original coordinates aren't overwritten
@@ -183,14 +188,14 @@ class Localize_Dataset(data.Dataset):
             pbox[[2,0]] = im.size[0] - pbox[[0,2]]
             
         # randomly shift the center of the crop
-        shift_scale = 150
+        shift_scale = 80
         x_shift = np.random.normal(0,im.size[0]/shift_scale)
         y_shift = np.random.normal(0,im.size[1]/shift_scale)
         #x_shift = 0
         #y_shift = 0
         
         #buffer  = 0#min(bbox[2]-bbox[0],bbox[3]-bbox[1])/3# max(-5,np.random.normal(70,im.size[1]/shift_scale))
-        bufferx = max(0,np.random.normal(5,10))
+        bufferx = max(0,np.random.normal(10,10)) #was 5
         buffery = max(0,bufferx*(np.random.rand()+0.5))
         # note may have indexed these wrongly
         minx = max(0,bbox[0]-bufferx)
@@ -249,7 +254,29 @@ class Localize_Dataset(data.Dataset):
         
         # convert image and label to tensors
         im_t = self.im_tf(im_crop)
-        return im_t, y,pbox
+        
+        
+        # calc difficulty
+        if bbox[0] < 0 or bbox[1] < 0 or bbox[2] > 224 or bbox[3] > 224 or stats[0] > 0:
+            truncation = 1
+        else:
+            truncation = 0
+        
+        if stats[1] == -1:
+            occlusion = 1
+        else:
+            occlusion = 0
+        
+        angle = stats[2]
+        amax = 60
+        if angle > amax and angle < 180-amax or angle > 180 + amax and angle > 360 - amax:
+            orientation = 1
+        else:
+            orientation = 0
+        
+        score = 1 + occlusion + truncation
+        stats = np.array([stats[0],stats[1],stats[2],score])
+        return im_t, y,pbox,stats
     
     
     
@@ -433,6 +460,13 @@ class Localize_Dataset(data.Dataset):
                                 float(coords['top']),
                                 float(coords['left']) + float(coords['width']),
                                 float(coords['top'])  + float(coords['height'])])
+                try:
+                    occ = list(data[2])[0].attrib
+                    occlusion = int(occ["occlusion_status"])
+                   
+                except:
+                    occlusion = 0
+                    
                 det_dict = {
                         'id':int(boxid.attrib['id']),
                         'class':stats['vehicle_type'],
@@ -440,7 +474,8 @@ class Localize_Dataset(data.Dataset):
                         'color':stats['color'],
                         'orientation':float(stats['orientation']),
                         'truncation':float(stats['truncation_ratio']),
-                        'bbox':bbox
+                        'bbox':bbox,
+                        'occlusion':occlusion
                         }
                 
                 frame_boxes.append(det_dict)
@@ -461,7 +496,7 @@ class Localize_Dataset(data.Dataset):
         mean = np.array([0.485, 0.456, 0.406])
         stddev = np.array([0.229, 0.224, 0.225])
         
-        im,label,prev = self[index]
+        im,label,prev,stats = self[index]
         
         im = self.denorm(im)
         cv_im = np.array(im) 
@@ -478,7 +513,7 @@ class Localize_Dataset(data.Dataset):
         cv2.rectangle(cv_im,(int(label[0]),int(label[1])),(int(label[2]),int(label[3])),(255,0,0),2)    
         cv2.rectangle(cv_im,(int(prev[0]),int(prev[1])),(int(prev[2]),int(prev[3])),(0,0,255),1)  
         
-        cv2.imshow("Class: {}".format(label[4]),cv_im)
+        cv2.imshow("C: {}  O: {}  S:{}".format(label[4],stats[2],stats[3]),cv_im)
         cv2.waitKey(0) 
         cv2.destroyAllWindows()
         
@@ -524,9 +559,8 @@ if __name__ == "__main__":
         image_dir = "/home/worklab/Desktop/detrac/DETRAC-train-data"
         label_dir = "/home/worklab/Desktop/detrac/DETRAC-Train-Annotations-XML-v3"
         test = Localize_Dataset(image_dir,label_dir)
-    for i in range(10):
-        idx = np.random.randint(0,len(test))
-        test.show(idx)
-        test.show(idx)
+    for i in range(20):
+            idx = np.random.randint(0,len(test))
+            test.show(idx)
     
     cv2.destroyAllWindows()

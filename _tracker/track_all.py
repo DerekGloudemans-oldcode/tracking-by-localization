@@ -67,7 +67,7 @@ if __name__ == "__main__":
      except:
          TRAIN = False
      #for det_conf_cutoff in [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]:
-         for det_step in [1,2,3,5,9,15,21,29,35,45]: 
+         for det_step in [9,2,3,5,1,15,21,29,35,45]: 
                 
                 #print("Beginning tracking with {}".format(det))
                 # input parameters
@@ -78,10 +78,11 @@ if __name__ == "__main__":
                 ber = 2
                 init_frames = 1
                 matching_cutoff = 100
-                SHOW = False
+                SHOW = True
                 loc_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_alpha.pt"
                 loc_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_TRACKTOR_SAVE_3.pt"
                 loc_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_detrac_resnet34_wer125_epoch_6.pt"
+                loc_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/cpu_incentive_epoch_19.pt"
 
                 det_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/detrac_retinanet_4-1.pt"
                 det_cp = "/home/worklab/Documents/code/tracking-by-localization/_train/detrac_retinanet_epoch7.pt"
@@ -116,11 +117,10 @@ if __name__ == "__main__":
                     }
                 
                 # get filter
-                filter_state_path = os.path.join(data_paths["filter_params"],"detrac_7_QRR_wer.cpkl")
+                filter_state_path = os.path.join(data_paths["filter_params"],"detrac_6_QRR_width.cpkl")
 
                 with open(filter_state_path ,"rb") as f:
                          kf_params = pickle.load(f)
-                
                 # get localizer
                 localizer = ResNet34_Localizer()
                 cp = torch.load(loc_cp)

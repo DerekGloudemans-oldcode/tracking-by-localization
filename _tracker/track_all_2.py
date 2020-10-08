@@ -27,7 +27,7 @@ from _detectors.pytorch_retinanet.retinanet.model import resnet50
 from loc_tracker_2 import Localization_Tracker
 from _eval import mot_eval as mot
 from _detectors.mock_detector import Mock_Detector
-
+#%%
 def get_track_dict(TRAIN):
     # get list of all files in directory and corresponding path to track and labels
     if TRAIN:
